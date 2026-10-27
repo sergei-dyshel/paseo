@@ -10,6 +10,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "incremental": true
+    // tsgo reuses tsconfig.tsbuildinfo written while a workspace dist/ was missing and keeps
+    // those imports typed as any after the dist is built, so typecheck reports phantom
+    // implicit-any errors in untouched packages. The cache saves nothing measurable.
+    "incremental": false
   }
 }
