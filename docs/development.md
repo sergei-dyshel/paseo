@@ -29,6 +29,20 @@ the titlebar row. Production builds leave the variable unset and show no label.
 
 `npm run dev` is only a shorthand for `npm run dev:server`. Keep `127.0.0.1:6767` for the packaged app and production-style `~/.paseo` state.
 
+## Local macOS app build
+
+To package an app that only runs on your Mac:
+
+```bash
+npm run build:desktop:local
+```
+
+It writes `packages/desktop/release/mac-arm64/Paseo.app` (`release/mac/` on Intel) with no DMG, ZIP, notarization, or publishing.
+
+Without a Developer ID certificate, electron-builder falls back to an ad-hoc signature. Ad-hoc code has no Team ID, so with the hardened runtime on, library validation refuses `Electron Framework` and the app aborts at launch with `Library not loaded ... different Team IDs`. The local script turns the hardened runtime off. Release builds keep it: the release workflow runs `npm run build:desktop` with signing credentials.
+
+The local app keeps the production bundle id `sh.paseo.desktop`. It shares settings and the single-instance lock with an installed Paseo.app and uses the daemon on `127.0.0.1:6767`.
+
 ## Nix desktop package
 
 The flake exposes `packages.<system>.desktop` on Linux and macOS:
