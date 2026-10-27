@@ -4,6 +4,7 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { getIsElectron, isWeb, isNative } from "@/constants/platform";
 import { readDesktopSystemIdleTimeMs } from "@/desktop/electron/idle";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
+import { getIsAppActivelyVisible } from "@/utils/app-visibility";
 import {
   type ClientActivityTracker,
   createClientActivityTracker,
@@ -23,6 +24,14 @@ interface ClientActivityOptions {
  * - Heartbeat sending every 15 seconds
  * - App visibility tracking
  * - Records lastActivityAt only on real user activity (not on heartbeat)
+ *
+ * The heartbeat's `appVisible` means "the user can see this agent right now". The daemon
+ * suppresses every notification for an agent when a present client reports `appVisible`
+ * with that agent focused. On web and Electron a window that is on screen but behind
+ * another app still has `visibilityState === "visible"`, so visibility alone would silence
+ * the notification the user needs. Report the same actively-visible signal
+ * (visible && window focused) that `notifyAgentAttention` uses to decide whether the user is
+ * looking at the agent, so the daemon and the client agree.
  */
 export function useClientActivity({
   client,
@@ -40,7 +49,7 @@ export function useClientActivity({
       deviceType: isWeb ? "web" : "mobile",
       initialFocusedAgentId: focusedAgentId,
       initialFocusedTerminalId: focusedTerminalId,
-      initialAppVisible: AppState.currentState === "active",
+      initialAppVisible: getIsAppActivelyVisible(),
       now: () => Date.now(),
       onAppResumed: (awayMs) => onAppResumedRef.current?.(awayMs),
     });
@@ -49,6 +58,7 @@ export function useClientActivity({
 
   // Track app visibility via AppState (native).
   useEffect(() => {
+    if (isWeb) return;
     const subscription = AppState.addEventListener("change", (nextState) => {
       tracker.notifyAppVisibility(nextState === "active");
       tracker.sendHeartbeat();
@@ -66,16 +76,26 @@ export function useClientActivity({
       tracker.maybeSendImmediateHeartbeat();
     };
 
+    const syncVisibility = (): boolean => {
+      const { changed } = tracker.notifyAppVisibility(getIsAppActivelyVisible());
+      // Leaving the agent must reach the daemon before the next turn finishes, or the
+      // daemon still believes the user is watching and drops the notification.
+      if (changed) tracker.sendHeartbeat();
+      return changed;
+    };
+
     const handleVisibilityChange = () => {
-      const visible = document.visibilityState === "visible";
-      const { changed } = tracker.notifyAppVisibility(visible);
-      if (changed && visible) {
-        tracker.maybeSendImmediateHeartbeat();
-      }
+      syncVisibility();
+    };
+
+    const handleWindowFocus = () => {
+      tracker.recordUserActivity();
+      if (!syncVisibility()) tracker.maybeSendImmediateHeartbeat();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleUserActivity);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleVisibilityChange);
     window.addEventListener("pointerdown", handleUserActivity, { passive: true });
     window.addEventListener("keydown", handleUserActivity);
     window.addEventListener("wheel", handleUserActivity, { passive: true });
@@ -83,7 +103,8 @@ export function useClientActivity({
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleUserActivity);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleVisibilityChange);
       window.removeEventListener("pointerdown", handleUserActivity);
       window.removeEventListener("keydown", handleUserActivity);
       window.removeEventListener("wheel", handleUserActivity);

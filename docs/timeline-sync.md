@@ -32,6 +32,8 @@ Client heartbeat reports presence:
 
 Heartbeat is used for notification routing. It must not be used as a correctness gate for `agent_stream` delivery. A stale mobile focus heartbeat may affect whether the user gets notified; it must not make timeline rows disappear from the live stream.
 
+`appVisible` means "the user can see the focused agent", not `document.visibilityState`. The daemon drops every notification for an agent when a present client reports `appVisible` with that agent focused (`packages/server/src/server/agent-attention-policy.ts`), so on web and Electron the client sends visible **and** window-focused (`packages/app/src/hooks/use-client-activity.ts`). A desktop window sitting behind another app is on screen but not watched; reporting it as visible silences the notification the user needs. Electron keeps `lastActivityAt` fresh from OS idle time, so presence alone never expires while the user is at the machine.
+
 ## Gap recovery is paged but complete
 
 Large unbounded timeline responses can exceed relay frame limits, so catch-up uses bounded pages. Bounded does not mean partial.

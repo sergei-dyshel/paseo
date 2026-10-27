@@ -2827,6 +2827,24 @@ export class VoiceAssistantWebSocketServer {
       nowMs,
     });
 
+    // One line per attention event. This is the only record of why a client did or did not
+    // get shouldNotify, and the default file level is info.
+    this.logger.info(
+      {
+        agentId: params.agentId,
+        reason: params.reason,
+        plan,
+        clients: notificationEntries.map(({ ws, state }) => ({
+          clientId: this.sessions.get(ws)?.clientId ?? null,
+          appVisible: state.appVisible,
+          focusedAgentId: state.focusedAgentId,
+          activityAgeMs:
+            state.lastActivityAtMs === null ? null : Math.max(0, nowMs - state.lastActivityAtMs),
+        })),
+      },
+      "agent_attention_plan",
+    );
+
     if (plan.shouldPush) {
       void this.pushNotificationSender.send(notification).catch((err) => {
         this.logger.warn({ err, agentId: params.agentId }, "Failed to send push notification");
