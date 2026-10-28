@@ -53,6 +53,16 @@ An arbitrary Activity launch with data extras does not exercise Expo's FCM path.
 Foreground pushes remain in Notification Center without a banner or sound.
 This preserves notifications sent with stale presence information.
 
+## Desktop delivery
+
+Electron main shows desktop notifications (`packages/desktop/src/features/notifications.ts`)
+and dismisses every outstanding one when any Paseo window gains focus. Once the user is
+looking at the app the banners are stale, and leaving them in Notification Center means a
+later click opens an agent the user has already moved past. A click on a notification
+focuses the window first, so the dismissal runs before the click payload is delivered;
+that is safe because the clicked notification is already gone from Notification Center
+and Electron's `close()` on it is a no-op.
+
 ## Startup and verification
 
 Wait for the root navigator, host registry, remembered selection, and startup
