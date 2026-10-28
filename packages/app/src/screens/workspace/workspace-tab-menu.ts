@@ -109,6 +109,11 @@ export interface WorkspaceDesktopTabActions {
   closeButtonTestId: string;
 }
 
+/** Tabs with a user-editable name: the Rename item and double-click-to-rename follow this. */
+export function isRenameableWorkspaceTab(tab: WorkspaceTabDescriptor): boolean {
+  return tab.target.kind === "agent" || tab.target.kind === "terminal";
+}
+
 function buildCloseBeforeLabel(
   surface: WorkspaceTabMenuSurface,
   labels: WorkspaceTabMenuLabels,
@@ -249,7 +254,7 @@ export function buildWorkspaceTabMenuEntries(
     entries.push({ kind: "file-panel-open-with", key: "file-panel-open-with" });
   }
 
-  if (tab.target.kind === "agent" || tab.target.kind === "terminal") {
+  if (isRenameableWorkspaceTab(tab)) {
     entries.push({
       kind: "item",
       key: "rename",

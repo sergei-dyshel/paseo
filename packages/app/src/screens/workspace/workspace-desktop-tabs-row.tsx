@@ -10,7 +10,14 @@ import React, {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Pressable, Text, View, type LayoutChangeEvent, type ScrollView } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+  type ScrollView,
+} from "react-native";
 import { useFilePanelOpenWithMenu } from "@/file-panels";
 import {
   CopyX,
@@ -60,10 +67,12 @@ import {
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 import {
   buildWorkspaceDesktopTabActions,
+  isRenameableWorkspaceTab,
   type WorkspaceDesktopTabActions,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
+import { isDoubleClickPress } from "@/utils/double-click";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { PaneHost } from "@/panels/panel-manifest";
 import type { WorkspaceTabLaunchPurpose } from "@/workspace-tabs/launcher";
@@ -731,6 +740,7 @@ function TabChip({
   resolvedTab,
   setHoveredCloseTabKey,
   onNavigateTab,
+  onRenameTab,
   onCloseTab,
   dragHandleProps,
 }: {
@@ -753,6 +763,7 @@ function TabChip({
   resolvedTab: WorkspaceDesktopTabActions;
   setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
   onNavigateTab: (tabId: string) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   dragHandleProps: DraggableListDragHandleProps | undefined;
 }) {
@@ -812,9 +823,17 @@ function TabChip({
     setHovered(false);
   }, []);
 
-  const handleNavigateTab = useCallback(() => {
-    onNavigateTab(tab.tabId);
-  }, [onNavigateTab, tab.tabId]);
+  const handleNavigateTab = useCallback(
+    (event: GestureResponderEvent) => {
+      onNavigateTab(tab.tabId);
+      // The first click of the pair already selected the tab; the second opens the same Rename
+      // the context menu offers.
+      if (isDoubleClickPress(event) && isRenameableWorkspaceTab(tab)) {
+        onRenameTab(tab);
+      }
+    },
+    [onNavigateTab, onRenameTab, tab],
+  );
 
   const handleCloseButtonPressIn = useCallback((event: { stopPropagation?: () => void }) => {
     event.stopPropagation?.();
@@ -1582,6 +1601,7 @@ function ResolvedDesktopTabChip({
         resolvedTab={resolvedTab}
         setHoveredCloseTabKey={setHoveredCloseTabKey}
         onNavigateTab={onNavigateTab}
+        onRenameTab={onRenameTab}
         onCloseTab={onCloseTab}
         dragHandleProps={dragHandleProps}
       />
