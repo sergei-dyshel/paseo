@@ -3,9 +3,15 @@ import { getDesktopHost } from "@/desktop/host";
 import { parseNotificationOpenTarget, WEB_NOTIFICATION_CLICK_EVENT } from "@/notification-open";
 import { isNative } from "@/constants/platform";
 
-interface OsNotificationPayload {
+export interface OsNotificationPayload {
   title: string;
+  /** Second line under the title. macOS only; the web fallback folds it into the body. */
+  subtitle?: string;
   body?: string;
+  /** Notifications sharing a groupId stack together in Notification Center. */
+  groupId?: string;
+  /** A new notification with the same id replaces the earlier one. */
+  id?: string;
   data?: Record<string, unknown>;
 }
 
@@ -17,47 +23,36 @@ interface WebNotificationInstance {
   addEventListener: (type: "click", listener: (event: Event) => void) => void;
 }
 
+interface WebNotificationOptions {
+  body?: string;
+  tag?: string;
+  data?: Record<string, unknown>;
+  icon?: string;
+}
+
 let permissionRequest: Promise<boolean> | null = null;
 let notificationIconUrl: string | null | undefined;
 
 function getDesktopNotificationSender():
-  | ((payload: {
-      title: string;
-      body?: string;
-      data?: Record<string, unknown>;
-    }) => Promise<boolean>)
+  | ((payload: OsNotificationPayload) => Promise<boolean>)
   | null {
   const sendNotification = getDesktopHost()?.notification?.sendNotification;
   return typeof sendNotification === "function"
-    ? (sendNotification as (payload: {
-        title: string;
-        body?: string;
-        data?: Record<string, unknown>;
-      }) => Promise<boolean>)
+    ? (sendNotification as (payload: OsNotificationPayload) => Promise<boolean>)
     : null;
 }
 
 function getWebNotificationConstructor(): {
   permission: string;
   requestPermission?: () => Promise<string>;
-  new (
-    title: string,
-    options?: {
-      body?: string;
-      data?: Record<string, unknown>;
-      icon?: string;
-    },
-  ): unknown;
+  new (title: string, options?: WebNotificationOptions): unknown;
 } | null {
   const NotificationConstructor = (
     globalThis as {
       Notification?: {
         permission: string;
         requestPermission?: () => Promise<string>;
-        new (
-          title: string,
-          options?: { body?: string; data?: Record<string, unknown>; icon?: string },
-        ): unknown;
+        new (title: string, options?: WebNotificationOptions): unknown;
       };
     }
   ).Notification;
@@ -156,8 +151,12 @@ export async function sendOsNotification(payload: OsNotificationPayload): Promis
   if (NotificationConstructor) {
     const granted = await ensureNotificationPermission();
     if (granted) {
+      // The web API has no subtitle, so it becomes the first body line; `tag`
+      // gives the same replace-on-repeat behavior as Electron's `id`.
+      const body = [payload.subtitle, payload.body].filter(Boolean).join("\n") || undefined;
       const notification = new NotificationConstructor(payload.title, {
-        body: payload.body,
+        body,
+        tag: payload.id,
         data: payload.data,
         icon: getWebNotificationIconUrl(),
       }) as WebNotificationInstance;

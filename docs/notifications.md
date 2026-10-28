@@ -55,6 +55,17 @@ This preserves notifications sent with stale presence information.
 
 ## Desktop delivery
 
+The daemon's notification title and body preview the agent's last message; that copy is
+for mobile push. The desktop composes its own text from the records the renderer already
+holds (`packages/app/src/utils/agent-attention-notification-text.ts`): the project name as
+the title, the workspace name as the macOS subtitle when it differs from the tab name, and
+`<tab name>: <event>` as the body, where the event is `Finished` or the permission request's
+kind and tool name (`Permission: Bash`, `Question: AskUserQuestion`). Notifications carry a
+`groupId` per workspace so a busy workspace stacks in Notification Center, and an `id` per
+agent so a newer notification replaces that agent's older one. The daemon's `data` is kept
+as-is because click routing reads it. The browser fallback has no subtitle or group, so it
+folds the subtitle into the body and maps `id` to the W3C `tag`.
+
 Electron main shows desktop notifications (`packages/desktop/src/features/notifications.ts`)
 and dismisses every outstanding one when any Paseo window gains focus. Once the user is
 looking at the app the banners are stale, and leaving them in Notification Center means a

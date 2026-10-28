@@ -1569,6 +1569,18 @@ export const ptBR: TranslationResources = {
         failed: "Falha ao enviar notificação.",
       },
     },
+    notifications: {
+      event: {
+        finished: "Concluído",
+        error: "Erro",
+        permission: "Permissão: {{name}}",
+        permissionUnnamed: "Solicitação de permissão",
+        question: "Pergunta: {{name}}",
+        questionUnnamed: "Pergunta",
+        plan: "Aprovação do plano: {{name}}",
+        planUnnamed: "Aprovação do plano",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "Não foi possível verificar o status de instalação da CLI.",
