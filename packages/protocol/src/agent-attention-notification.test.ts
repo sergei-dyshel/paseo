@@ -90,6 +90,49 @@ describe("buildAgentAttentionNotificationPayload", () => {
       },
     });
   });
+
+  it("marks a finished body when background work is still running", () => {
+    const longMessage = `${"word ".repeat(60)}end`;
+
+    const previewed = buildAgentAttentionNotificationPayload({
+      reason: "finished",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+      agentId: "agent-1",
+      assistantMessage: longMessage,
+      backgroundTaskCount: 2,
+    });
+    const fallback = buildAgentAttentionNotificationPayload({
+      reason: "finished",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+      agentId: "agent-1",
+      backgroundTaskCount: 1,
+    });
+
+    expect(previewed.body.endsWith("... (have BG tasks)")).toBe(true);
+    expect(fallback.body).toBe("Finished working. (have BG tasks)");
+  });
+
+  it("leaves permission and error bodies alone while background work is running", () => {
+    const permission = buildAgentAttentionNotificationPayload({
+      reason: "permission",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+      agentId: "agent-1",
+      backgroundTaskCount: 1,
+    });
+    const error = buildAgentAttentionNotificationPayload({
+      reason: "error",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+      agentId: "agent-1",
+      backgroundTaskCount: 1,
+    });
+
+    expect(permission.body).toBe("Permission requested.");
+    expect(error.body).toBe("Encountered an error.");
+  });
 });
 
 describe("findLatestAssistantMessageFromTimeline", () => {

@@ -1568,6 +1568,7 @@ export const ptBR: TranslationResources = {
     notifications: {
       event: {
         finished: "Concluído",
+        finishedWithBackgroundTasks: "Concluído (com tarefas em segundo plano)",
         error: "Erro",
         permission: "Permissão: {{name}}",
         permissionUnnamed: "Solicitação de permissão",

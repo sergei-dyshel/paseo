@@ -1547,6 +1547,7 @@ export const ko: TranslationResources = {
     notifications: {
       event: {
         finished: "완료",
+        finishedWithBackgroundTasks: "완료 (백그라운드 작업 있음)",
         error: "오류",
         permission: "권한: {{name}}",
         permissionUnnamed: "권한 요청",

@@ -98,6 +98,7 @@ import {
 import {
   getAgentStreamEventTurnId,
   type AgentPermissionAction,
+  type AgentBackgroundTask,
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
@@ -2304,6 +2305,12 @@ class ClaudeAgentSession implements AgentSession {
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private readonly timelineAssembler = new TimelineAssembler();
   private readonly taskState = new ClaudeTaskState();
+  /**
+   * Background work the current Claude process owns, as last announced by
+   * `background_tasks_changed`. The CLI emits nothing at startup, so this is empty until the
+   * first membership change and must be dropped whenever the process is lost.
+   */
+  private backgroundTasks: AgentBackgroundTask[] = [];
   private readonly taskProtocolSource = new ClaudeTaskProtocolSource({
     getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ?? null,
     readWorkflowResult: readClaudeWorkflowResultFile,
@@ -2993,6 +3000,7 @@ class ClaudeAgentSession implements AgentSession {
     this.sidechainTracker.clear();
     this.settledSubagentToolCalls.clear();
     this.taskProtocolSource.reset();
+    this.backgroundTasks = [];
     this.input?.end();
     this.query?.close?.();
     // close() already terminates the SDK query. Its control plane is no longer
@@ -4128,11 +4136,16 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private failRunningRuntimeTasks(): void {
-    this.dispatchEvents(
-      foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
-        (event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }),
-      ),
+    const events = foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
+      (event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }),
     );
+    // Background shells and monitors die with the process too, and the next process announces
+    // nothing until its own set changes.
+    if (this.backgroundTasks.length > 0) {
+      this.backgroundTasks = [];
+      events.push({ type: "background_tasks_changed", provider: "claude", tasks: [] });
+    }
+    this.dispatchEvents(events);
   }
 
   private startQueryPump(): void {
@@ -4812,6 +4825,18 @@ class ClaudeAgentSession implements AgentSession {
     }
     if (message.subtype === "task_progress") {
       return;
+    }
+    if (message.subtype === "background_tasks_changed") {
+      this.backgroundTasks = message.tasks.map((task) => ({
+        taskId: task.task_id,
+        taskType: task.task_type,
+        description: task.description,
+      }));
+      events.push({
+        type: "background_tasks_changed",
+        provider: "claude",
+        tasks: this.backgroundTasks,
+      });
     }
   }
 

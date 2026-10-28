@@ -148,6 +148,7 @@ export function toAgentPayload(
     title: options?.title ?? null,
     labels: agent.labels,
     archivedAt: options?.archivedAt ?? null,
+    backgroundTaskCount: agent.backgroundTaskCount,
     ...(agent.internal ? { internal: true } : {}),
   };
 

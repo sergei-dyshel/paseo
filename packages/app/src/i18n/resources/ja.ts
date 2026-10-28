@@ -1554,6 +1554,7 @@ export const ja: TranslationResources = {
     notifications: {
       event: {
         finished: "完了",
+        finishedWithBackgroundTasks: "完了（バックグラウンドタスクあり）",
         error: "エラー",
         permission: "許可: {{name}}",
         permissionUnnamed: "許可リクエスト",

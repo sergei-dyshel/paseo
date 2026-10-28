@@ -217,6 +217,8 @@ Workspace status is an aggregate activity signal computed **per `workspaceId`**.
 
 Running provider-native subagents contribute `running` to the workspace owned by their parent agent. Their completed, failed, and canceled states stay in the parent's subagents track.
 
+Background work the provider runtime still owns between turns contributes `running` the same way. Claude Code announces its live set with `background_tasks_changed` (shells, monitors, backgrounded subagents, workflows); the agent snapshot carries it as `backgroundTaskCount`. Read it as a level signal with replace semantics, never by pairing `task_started` with `task_notification` — a missed bookend would wedge the indicator. The CLI emits nothing at process start, so the provider drops the set whenever its process is retired or dies. The agent itself stays `idle` with `finished` attention, so the finished notification still fires; its body ends in `(have BG tasks)` so the reader knows the agent will wake again.
+
 A finished workspace can be marked unread after it has been reviewed. The daemon restores
 `finished` attention on its newest eligible workspace-root agent without sending a new completion
 notification. Opening the workspace clears that attention through the normal focus flow.

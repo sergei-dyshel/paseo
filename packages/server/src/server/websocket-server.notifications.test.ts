@@ -287,6 +287,29 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-1");
   });
 
+  it("marks a finished push body when the agent still has background work", async () => {
+    const { server, pushNotifications } = createServer({
+      getAgent: vi.fn(() => ({
+        config: { title: null },
+        cwd: "/tmp/worktree",
+        workspaceId: WORKSPACE_ID,
+        pendingPermissions: new Map(),
+        backgroundTaskCount: 1,
+      })),
+      getLastAssistantMessage: vi.fn(async () => "Spawned the build."),
+    });
+
+    await asInternals<WebSocketServerInternals>(server).broadcastAgentAttention({
+      agentId: "agent-1",
+      provider: "claude",
+      reason: "finished",
+    });
+
+    expect(pushNotifications.sent.map((payload) => payload.body)).toEqual([
+      "Spawned the build. (have BG tasks)",
+    ]);
+  });
+
   it("sends push notifications regardless of UI label presence", async () => {
     const getLastAssistantMessage = vi.fn(async () => "Done.");
     const { server, pushNotifications } = createServer({

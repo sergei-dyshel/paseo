@@ -861,6 +861,9 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  // Live background work (shells, monitors, backgrounded subagents) the provider runtime still
+  // owns while the agent sits idle between turns. Absent means none.
+  backgroundTaskCount: z.number().int().nonnegative().optional(),
   // Private helper marker, retained for exact-ID snapshots and older wire messages.
   internal: z.boolean().optional(),
 });

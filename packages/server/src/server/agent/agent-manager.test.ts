@@ -5136,6 +5136,67 @@ test("session config drift events update state through the stream channel", asyn
   expect(persisted?.config?.modeId).toBe("build");
 });
 
+test("a background_tasks_changed event lands on the snapshot and stays off the stream", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-background-tasks-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let capturedSession: TestAgentSession | null = null;
+  class BackgroundTaskClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new TestAgentSession(config);
+      return capturedSession;
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new BackgroundTaskClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000139",
+  });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const streams: AgentStreamEvent[] = [];
+    const stateCounts: number[] = [];
+    manager.subscribe(
+      (event) => {
+        if (event.type === "agent_stream") {
+          streams.push(event.event);
+        } else if (event.type === "agent_state") {
+          stateCounts.push(toAgentPayload(event.agent).backgroundTaskCount ?? -1);
+        }
+      },
+      { agentId: snapshot.id, replayState: false },
+    );
+
+    capturedSession?.pushEvent({
+      type: "background_tasks_changed",
+      provider: "codex",
+      tasks: [
+        { taskId: "bash-1", taskType: "local_bash", description: "sleep 5" },
+        { taskId: "agent-1", taskType: "local_agent", description: "Explore" },
+      ],
+    });
+    await manager.flush();
+    expect(toAgentPayload(manager.getAgent(snapshot.id)!).backgroundTaskCount).toBe(2);
+
+    // Replace semantics: the next announcement is the whole set, not a delta.
+    capturedSession?.pushEvent({ type: "background_tasks_changed", provider: "codex", tasks: [] });
+    await manager.flush();
+    expect(toAgentPayload(manager.getAgent(snapshot.id)!).backgroundTaskCount).toBe(0);
+
+    expect(stateCounts).toEqual([2, 0]);
+    expect(streams.map((event) => event.type)).toEqual([]);
+    // Runtime-only: a resumed process starts with no background work.
+    expect(await storage.get(snapshot.id)).not.toHaveProperty("backgroundTaskCount");
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("a provider title_changed event replaces the stored title and stays off the stream", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-changed-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

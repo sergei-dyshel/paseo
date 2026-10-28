@@ -1565,6 +1565,7 @@ export const ru: TranslationResources = {
     notifications: {
       event: {
         finished: "Завершено",
+        finishedWithBackgroundTasks: "Завершено (есть фоновые задачи)",
         error: "Ошибка",
         permission: "Разрешение: {{name}}",
         permissionUnnamed: "Запрос разрешения",

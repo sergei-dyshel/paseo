@@ -1579,6 +1579,7 @@ export const fr: TranslationResources = {
     notifications: {
       event: {
         finished: "Terminé",
+        finishedWithBackgroundTasks: "Terminé (tâches en arrière-plan)",
         error: "Erreur",
         permission: "Autorisation : {{name}}",
         permissionUnnamed: "Demande d'autorisation",

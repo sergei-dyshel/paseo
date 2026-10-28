@@ -1562,6 +1562,7 @@ export const en = {
     notifications: {
       event: {
         finished: "Finished",
+        finishedWithBackgroundTasks: "Finished (have BG tasks)",
         error: "Error",
         permission: "Permission: {{name}}",
         permissionUnnamed: "Permission request",

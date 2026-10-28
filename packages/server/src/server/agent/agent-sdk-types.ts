@@ -466,7 +466,21 @@ export type AgentStreamEvent =
       type: "provider_subagent";
       provider: AgentProvider;
       event: import("./provider-subagents/store.js").ProviderSubagentInputEvent;
-    };
+    }
+  /**
+   * The full set of background work the provider runtime currently owns (shells, monitors,
+   * backgrounded subagents, workflows). A level signal with replace semantics: the receiver swaps
+   * its set for `tasks`, so a missed start or finish cannot leave a stale indicator. The manager
+   * folds it into the agent snapshot; it never reaches the wire as a stream frame.
+   */
+  | { type: "background_tasks_changed"; provider: AgentProvider; tasks: AgentBackgroundTask[] };
+
+export interface AgentBackgroundTask {
+  taskId: string;
+  /** Provider task kind, e.g. Claude's `local_bash`, `local_agent`, `local_workflow`. */
+  taskType: string;
+  description: string;
+}
 
 export function getAgentStreamEventTurnId(event: AgentStreamEvent): string | undefined {
   return "turnId" in event ? event.turnId : undefined;

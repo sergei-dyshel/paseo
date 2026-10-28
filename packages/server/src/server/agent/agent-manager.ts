@@ -433,6 +433,11 @@ interface ManagedAgentBase {
   lastUsage?: AgentUsage;
   lastError?: string;
   attention: AttentionState;
+  /**
+   * Background work the provider runtime still owns between turns. Runtime-only: it is not
+   * persisted, because a resumed process starts with none.
+   */
+  backgroundTaskCount: number;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
   finalizedForegroundTurnIds: Set<string>;
   unsubscribeSession: (() => void) | null;
@@ -2015,6 +2020,7 @@ export class AgentManager {
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
+        backgroundTaskCount: 0,
         internal: record.internal,
         labels: record.labels,
       },
@@ -3799,6 +3805,7 @@ export class AgentManager {
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
+      backgroundTaskCount: 0,
       internal: config.internal ?? false,
       labels: options?.labels ?? {},
     } as ActiveManagedAgent;
@@ -3846,6 +3853,7 @@ export class AgentManager {
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
+      backgroundTaskCount: 0,
       foregroundTurnWaiters: new Set(),
       finalizedForegroundTurnIds: new Set(),
       unsubscribeSession: null,
@@ -4435,44 +4443,15 @@ export class AgentManager {
   }): Promise<void> | undefined {
     const { agent, event, options, isForegroundEvent, eventTurnId, terminalDisposition, flags } =
       params;
+    if (this.applySnapshotOnlyEvent(agent, event, flags)) {
+      return undefined;
+    }
     switch (event.type) {
       case "thread_started":
         this.onStreamThreadStarted(agent);
         return undefined;
       case "usage_updated":
         agent.lastUsage = event.usage;
-        this.emitState(agent);
-        return undefined;
-      case "mode_changed":
-        this.applyObservedMode(agent, event.currentModeId);
-        agent.availableModes = event.availableModes;
-        if (agent.runtimeInfo) {
-          agent.runtimeInfo = { ...agent.runtimeInfo, modeId: event.currentModeId };
-        }
-        flags.shouldDispatchEvent = false;
-        this.emitState(agent);
-        return undefined;
-      case "model_changed":
-        agent.runtimeInfo = event.runtimeInfo;
-        if (!agent.persistence && event.runtimeInfo.sessionId) {
-          agent.persistence = attachPersistenceCwd(
-            { provider: agent.provider, sessionId: event.runtimeInfo.sessionId },
-            agent.cwd,
-          );
-        }
-        this.applyObservedMode(agent, event.runtimeInfo.modeId ?? agent.currentModeId);
-        flags.shouldDispatchEvent = false;
-        this.emitState(agent);
-        return undefined;
-      case "thinking_option_changed":
-        agent.config.thinkingOptionId = event.thinkingOptionId ?? undefined;
-        if (agent.runtimeInfo) {
-          agent.runtimeInfo = {
-            ...agent.runtimeInfo,
-            thinkingOptionId: event.thinkingOptionId,
-          };
-        }
-        flags.shouldDispatchEvent = false;
         this.emitState(agent);
         return undefined;
       case "title_changed":
@@ -4520,6 +4499,53 @@ export class AgentManager {
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Provider facts that live on the agent snapshot rather than in the timeline. Clients learn
+   * them from the next `agent_state`, so the stream frame is withheld.
+   */
+  private applySnapshotOnlyEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    flags: StreamEventFlags,
+  ): boolean {
+    switch (event.type) {
+      case "mode_changed":
+        this.applyObservedMode(agent, event.currentModeId);
+        agent.availableModes = event.availableModes;
+        if (agent.runtimeInfo) {
+          agent.runtimeInfo = { ...agent.runtimeInfo, modeId: event.currentModeId };
+        }
+        break;
+      case "model_changed":
+        agent.runtimeInfo = event.runtimeInfo;
+        if (!agent.persistence && event.runtimeInfo.sessionId) {
+          agent.persistence = attachPersistenceCwd(
+            { provider: agent.provider, sessionId: event.runtimeInfo.sessionId },
+            agent.cwd,
+          );
+        }
+        this.applyObservedMode(agent, event.runtimeInfo.modeId ?? agent.currentModeId);
+        break;
+      case "thinking_option_changed":
+        agent.config.thinkingOptionId = event.thinkingOptionId ?? undefined;
+        if (agent.runtimeInfo) {
+          agent.runtimeInfo = {
+            ...agent.runtimeInfo,
+            thinkingOptionId: event.thinkingOptionId,
+          };
+        }
+        break;
+      case "background_tasks_changed":
+        agent.backgroundTaskCount = event.tasks.length;
+        break;
+      default:
+        return false;
+    }
+    flags.shouldDispatchEvent = false;
+    this.emitState(agent);
+    return true;
   }
 
   private onStreamThreadStarted(agent: ActiveManagedAgent): void {
