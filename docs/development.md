@@ -29,19 +29,20 @@ the titlebar row. Production builds leave the variable unset and show no label.
 
 `npm run dev` is only a shorthand for `npm run dev:server`. Keep `127.0.0.1:6767` for the packaged app and production-style `~/.paseo` state.
 
-## Local macOS app build
-
-To package an app that only runs on your Mac:
+## Local macOS app builds
 
 ```bash
-npm run build:desktop:local
+npm run build:desktop:dev     # developer identity  → packages/desktop/dev/mac-arm64/Paseo.app
+npm run build:desktop:local   # production identity → packages/desktop/release/mac-arm64/Paseo.app
 ```
 
-It writes `packages/desktop/release/mac-arm64/Paseo.app` (`release/mac/` on Intel) with no DMG, ZIP, notarization, or publishing.
+**Agents: build and verify with `build:desktop:dev`.** It is the copy that runs next to the installed Paseo.app during development. `build:desktop:local` produces the real product identity and is for replacing the install in `/Applications`; `build:desktop` is the release build the workflows run with signing credentials.
 
-Without a Developer ID certificate, electron-builder falls back to an ad-hoc signature. Ad-hoc code has no Team ID, so with the hardened runtime on, library validation refuses `Electron Framework` and the app aborts at launch with `Library not loaded ... different Team IDs`. The local script turns the hardened runtime off. Release builds keep it: the release workflow runs `npm run build:desktop` with signing credentials.
+Both local scripts write only the `.app` (`release/mac/` on Intel): no DMG, ZIP, notarization, or publishing. Without a Developer ID certificate, electron-builder falls back to an ad-hoc signature. Ad-hoc code has no Team ID, so with the hardened runtime on, library validation refuses `Electron Framework` and the app aborts at launch with `Library not loaded ... different Team IDs`. The local scripts turn the hardened runtime off; release builds keep it.
 
-The local app keeps the production bundle id `sh.paseo.desktop`. It shares settings and the single-instance lock with an installed Paseo.app and uses the daemon on `127.0.0.1:6767`.
+`build:desktop:local` keeps bundle id `sh.paseo.desktop` and the `paseo://` scheme. Keep one copy of that identity on the machine: macOS resolves notification clicks and deep links by bundle id, and with two registered copies they land on whichever one Launch Services picks.
+
+`build:desktop:dev` uses `electron-builder.dev.yml`, which differs from production in bundle id (`sh.paseo.desktop.dev`), in not registering `paseo://`, and in its icon: the blue blueprint `assets/icon-dev.png` that `npm run dev:desktop` also uses, so the Dock and Finder show which copy you are looking at. Product name, `userData` (settings, hosts, window state), and the single-instance lock are all shared with the installed app: launching the dev copy while Paseo.app is running hands off to the running app instead of starting, so quit one before starting the other. Shared settings live in `electron-builder.base.yml`; `protocols` stays out of the base because electron-builder concatenates arrays across `extends` and rejects `null`, so a child config could not remove the scheme.
 
 ## Nix desktop package
 
