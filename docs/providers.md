@@ -125,6 +125,10 @@ A rename made while Paseo was detached (another `claude --resume`) is reported t
 
 The other direction is `AgentSession.setTitle`: a rename the user makes in Paseo (tab menu, CLI `agent update --name`, MCP `update_agent`) reaches the provider before Paseo stores it, so a provider refusal leaves both names unchanged. Renames the provider reports through `title_changed` are not echoed back. Claude sends the CLI's `rename_session` control request with `source: "host"` when a process is attached — the CLI then owns the record and its in-memory name — and appends the `custom-title` line itself only when no process is up, since a record appended under a running CLI is overwritten by that CLI's next save. `Query.request` is not in the SDK's declared `Query` type; `renameClaudeSession` in `providers/claude/query.ts` reaches it by inspection and is the one place that knows this.
 
+A Claude session has one live process. Every transcript record carries the writer's `entrypoint`, and two processes on one session (a Paseo agent plus a terminal `claude --resume <id>`) both append to the same file. The CLI registers each live process in `~/.claude/sessions/<pid>.json` with its `name`; when two share a name it renames the newcomer with a random suffix and writes that as `custom-title`, which Paseo then reads as an external rename. Tell the user to resume in one place or the other.
+
+The interactive `claude --resume` picker hides transcripts whose first record has an SDK `entrypoint` (`sdk-cli`, `sdk-ts`, `sdk-py`); the SDK's `listSessions()` does not. `query.ts` sets `CLAUDE_CODE_ENTRYPOINT=Paseo` on the child, so sessions Paseo starts are listed. The first record is never rewritten, so sessions started before that change stay hidden; `claude --resume <id>` opens them regardless.
+
 ## Provider Helper Processes
 
 Provider-owned helper processes that can outlive an individual agent session must be recorded in the daemon's managed-process registry. Store provider/kind metadata, the PID, launch command/args, and process identity captured from the platform process table. Remove the record on normal exit or shutdown.
