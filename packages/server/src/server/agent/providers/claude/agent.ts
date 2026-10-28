@@ -73,7 +73,12 @@ import {
 } from "./options.js";
 import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
 import { discoverClaudeModels } from "./model-discovery.js";
-import { claudeQuery, type ClaudeOptions, type ClaudeQueryFactory } from "./query.js";
+import {
+  claudeQuery,
+  renameClaudeSession,
+  type ClaudeOptions,
+  type ClaudeQueryFactory,
+} from "./query.js";
 import {
   realClaudeRewindSdk,
   revertClaudeConversation,
@@ -3142,6 +3147,28 @@ class ClaudeAgentSession implements AgentSession {
       this.rememberCustomTitle(title);
       events.unshift({ type: "title_changed", provider: "claude", title });
     }
+  }
+
+  async setTitle(title: string): Promise<void> {
+    const normalized = normalizeClaudeSessionTitle(title);
+    if (!normalized) {
+      throw new Error("Claude session title must not be empty");
+    }
+    if (!this.claudeSessionId) {
+      // No native session exists until the first prompt; Paseo's title is all there is.
+      return;
+    }
+    if (this.query) {
+      await renameClaudeSession(this.query, normalized);
+    } else {
+      await appendClaudeCustomTitleRecord({
+        cwd: this.config.cwd,
+        sessionId: this.claudeSessionId,
+        configDir: claudeConfigDir(this.harnessEnvironment),
+        title: normalized,
+      });
+    }
+    this.rememberCustomTitle(normalized);
   }
 
   /** The persisted handle carries the title, so a change invalidates the cached one. */
@@ -6821,6 +6848,29 @@ async function readClaudeRenamedSessionTitle(input: {
     throw error;
   }
   return readLastClaudeCustomTitle(content);
+}
+
+/**
+ * With no CLI process attached, the transcript is the only holder of the name, so the record is
+ * appended directly — the same line the SDK's `renameSession()` writes. A session with no
+ * transcript yet has nothing to rename; writing one would invent a session Claude never started.
+ */
+async function appendClaudeCustomTitleRecord(input: {
+  cwd: string;
+  sessionId: string;
+  configDir: string;
+  title: string;
+}): Promise<void> {
+  const transcriptPath = claudeTranscriptPathSync(input);
+  if (!fs.existsSync(transcriptPath)) {
+    return;
+  }
+  const record = {
+    type: CLAUDE_CUSTOM_TITLE_TYPE,
+    customTitle: input.title,
+    sessionId: input.sessionId,
+  };
+  await fsPromises.appendFile(transcriptPath, `${JSON.stringify(record)}\n`, "utf8");
 }
 
 function normalizeImportablePromptPreview(text: string): string | null {

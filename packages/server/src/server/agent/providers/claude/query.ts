@@ -114,3 +114,29 @@ export function claudeQuery(input: ClaudeQueryInput, context: ClaudeQueryContext
     options: applyRuntimeSettingsToClaudeOptions(input.options, context),
   });
 }
+
+interface ClaudeRenameSessionControlRequest {
+  subtype: "rename_session";
+  title: string;
+  /** `host` makes the CLI treat it as the user's own rename, like `/rename`. */
+  source: "host";
+}
+type ClaudeControlRequestSender = (request: ClaudeRenameSessionControlRequest) => Promise<unknown>;
+
+/**
+ * Rename the session inside the running CLI. The CLI's control protocol accepts
+ * `rename_session` (SDK 0.3.246 types it as `SDKControlRenameSessionRequest`), and the CLI
+ * updates its in-memory name and appends the `custom-title` record itself. Appending the record
+ * from outside would not stick: the CLI re-emits its own name on save, and the last record wins.
+ * `Query.request` is the SDK's control-channel sender; `Query`'s declared surface does not include
+ * it, so it is reached by inspection.
+ */
+export async function renameClaudeSession(activeQuery: Query, title: string): Promise<void> {
+  const request = Reflect.get(activeQuery, "request");
+  if (typeof request !== "function") {
+    throw new Error("Claude Agent SDK query has no control-request channel; cannot rename session");
+  }
+  const send: ClaudeControlRequestSender = (controlRequest) =>
+    Promise.resolve(request.call(activeQuery, controlRequest));
+  await send({ subtype: "rename_session", title, source: "host" });
+}

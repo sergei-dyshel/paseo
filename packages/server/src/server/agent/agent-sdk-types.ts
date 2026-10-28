@@ -705,6 +705,12 @@ export interface AgentSession {
   setModel?(modelId: string | null): Promise<void>;
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;
   setFeature?(featureId: string, value: unknown): Promise<void>;
+  /**
+   * Give the provider's own session the agent's new title, so the name the user chose in Paseo
+   * is the one the provider shows (Claude Code `/resume`). Omitted when the provider has no
+   * session names.
+   */
+  setTitle?(title: string): Promise<void>;
   revertConversation?(input: { messageId: string }): Promise<void>;
   revertFiles?(input: { messageId: string }): Promise<void>;
   revertBoth?(input: { messageId: string }): Promise<void>;

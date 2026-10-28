@@ -2389,6 +2389,9 @@ export class AgentManager {
     const liveAgent = this.getAgent(agentId);
     if (liveAgent) {
       if (updates.title) {
+        // The provider goes first: if it refuses, nothing changed anywhere. A provider rename
+        // that lands without the Paseo write is caught by the next resume.
+        await liveAgent.session?.setTitle?.(updates.title.trim());
         await this.setTitle(agentId, updates.title);
       }
       if (updates.labels) {

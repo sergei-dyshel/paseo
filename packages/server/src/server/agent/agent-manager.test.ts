@@ -5189,6 +5189,84 @@ test("a provider title_changed event replaces the stored title and stays off the
   }
 });
 
+test("an explicit rename reaches the provider session before it is stored", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-rename-provider-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const order: string[] = [];
+  class TitledSession extends TestAgentSession {
+    nativeTitle: string | null = null;
+    async setTitle(title: string): Promise<void> {
+      if (title === "refused") {
+        throw new Error("provider refused the rename");
+      }
+      order.push(`provider:${title}`);
+      this.nativeTitle = title;
+    }
+    override describePersistence() {
+      return {
+        ...super.describePersistence(),
+        metadata: this.nativeTitle ? { customTitle: this.nativeTitle } : {},
+      };
+    }
+  }
+  let session: TitledSession | null = null;
+  class TitledClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TitledSession(config);
+      return session;
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new TitledClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000137",
+  });
+  const applySnapshot = storage.applySnapshot.bind(storage);
+  const snapshotSpy = vi.spyOn(storage, "applySnapshot").mockImplementation((agent, options) => {
+    if (options?.title) {
+      order.push(`stored:${options.title}`);
+    }
+    return applySnapshot(agent, options);
+  });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await manager.setTitle(snapshot.id, "Review billing");
+    await manager.flush();
+    order.length = 0;
+
+    await manager.updateAgentMetadata(snapshot.id, { title: "  Billing rework  " });
+    await manager.flush();
+
+    expect(order).toEqual(["provider:Billing rework", "stored:Billing rework"]);
+    const stored = await storage.get(snapshot.id);
+    expect(stored?.title).toBe("Billing rework");
+    expect(stored?.persistence?.metadata).toMatchObject({ customTitle: "Billing rework" });
+
+    // A provider refusal leaves Paseo's title alone, so the two never disagree.
+    await expect(manager.updateAgentMetadata(snapshot.id, { title: "refused" })).rejects.toThrow(
+      "provider refused the rename",
+    );
+    await manager.flush();
+    expect((await storage.get(snapshot.id))?.title).toBe("Billing rework");
+    expect(session?.nativeTitle).toBe("Billing rework");
+
+    // A rename the provider reports is stored without being echoed back to it.
+    order.length = 0;
+    session?.pushEvent({ type: "title_changed", provider: "codex", title: "From provider" });
+    await manager.flush();
+    expect(order).toEqual(["stored:From provider"]);
+  } finally {
+    snapshotSpy.mockRestore();
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("a title_changed reported at resume lands in storage with the provider's refreshed handle", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-changed-resume-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

@@ -2507,6 +2507,7 @@ describe("ClaudeAgentSession context window usage", () => {
         supportedModels: vi.fn(async () => []),
         supportedCommands: vi.fn(async () => []),
         rewindFiles: vi.fn(async () => ({ canRewind: true })),
+        request: vi.fn(async () => ({ subtype: "success" })),
         [Symbol.asyncIterator]() {
           return this;
         },
@@ -3967,16 +3968,38 @@ describe("ClaudeAgentSession context window usage", () => {
       );
     }
 
-    async function createRenameSession(
+    interface RenameSessionHarness {
+      session: AgentSession;
+      queryFactory: ReturnType<typeof createQueryFactoryForTurns>;
+    }
+
+    async function createRenameSessionHarness(
       turns: Array<Array<Record<string, unknown>>>,
-    ): Promise<AgentSession> {
+    ): Promise<RenameSessionHarness> {
+      const queryFactory = createQueryFactoryForTurns(turns);
       const client = new ClaudeAgentClient({
         logger,
-        queryFactory: createQueryFactoryForTurns(turns),
+        queryFactory,
         resolveBinary: async () => "/test/claude/bin",
         runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
       });
-      return await client.createSession({ provider: "claude", cwd });
+      const session = await client.createSession({ provider: "claude", cwd });
+      return { session, queryFactory };
+    }
+
+    async function createRenameSession(
+      turns: Array<Array<Record<string, unknown>>>,
+    ): Promise<AgentSession> {
+      return (await createRenameSessionHarness(turns)).session;
+    }
+
+    async function readTranscriptTitles(): Promise<string[]> {
+      const projectDir = claudeProjectDirSync(cwd, { configDir });
+      const content = await fs.readFile(path.join(projectDir, `${sessionId}.jsonl`), "utf8");
+      return content
+        .split("\n")
+        .filter((line) => line.includes('"custom-title"'))
+        .map((line) => JSON.parse(line).customTitle);
     }
 
     interface ResumedRenameSession {
@@ -4186,6 +4209,78 @@ describe("ClaudeAgentSession context window usage", () => {
       try {
         expect(titleChanges(events)).toEqual([]);
         expect(session.describePersistence()?.metadata).not.toHaveProperty("customTitle");
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("setTitle renames the session inside the running CLI", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+      ]);
+      const { session, queryFactory } = await createRenameSessionHarness([
+        [createInitMessage(sessionId), createSuccessResult({ session_id: sessionId })],
+      ]);
+      try {
+        await collectStreamEvents(session, "Review billing");
+        await session.setTitle?.("  Billing rework  ");
+        const query = queryFactory.mock.results[0]?.value;
+        expect(query?.request).toHaveBeenCalledWith({
+          subtype: "rename_session",
+          title: "Billing rework",
+          source: "host",
+        });
+        // The CLI writes the record itself; Paseo must not add a competing one.
+        expect(await readTranscriptTitles()).toEqual([]);
+        expect(session.describePersistence()?.metadata).toMatchObject({
+          customTitle: "Billing rework",
+        });
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("setTitle appends the record when no CLI process is attached", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Invoices", sessionId },
+      ]);
+      const { session } = await resumeRenameSession({ customTitle: "Invoices" });
+      try {
+        await session.setTitle?.("Billing rework");
+        expect(await readTranscriptTitles()).toEqual(["Invoices", "Billing rework"]);
+        expect(session.describePersistence()?.metadata).toMatchObject({
+          customTitle: "Billing rework",
+        });
+      } finally {
+        await session.close();
+      }
+      // The next resume sees the title it already applied and stays quiet.
+      const resumed = await resumeRenameSession({ customTitle: "Billing rework" });
+      try {
+        expect(titleChanges(resumed.events)).toEqual([]);
+      } finally {
+        await resumed.session.close();
+      }
+    });
+
+    test("setTitle does not invent a transcript for a session Claude never started", async () => {
+      const { session } = await resumeRenameSession({});
+      try {
+        await session.setTitle?.("Billing rework");
+        const projectDir = claudeProjectDirSync(cwd, { configDir });
+        await expect(fs.stat(path.join(projectDir, `${sessionId}.jsonl`))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("setTitle rejects an empty title", async () => {
+      const { session } = await resumeRenameSession({});
+      try {
+        await expect(session.setTitle?.("   ")).rejects.toThrow("must not be empty");
       } finally {
         await session.close();
       }
