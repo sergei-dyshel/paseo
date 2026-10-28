@@ -1,4 +1,10 @@
-import { useMemo, type ComponentProps, type PropsWithChildren, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  type ComponentProps,
+  type PropsWithChildren,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -9,11 +15,17 @@ import {
   Copy,
   MoreVertical,
   Pencil,
+  PencilLine,
   Pin,
   PinOff,
   Tag,
 } from "lucide-react-native";
 import { isWeb } from "@/constants/platform";
+import { useToast } from "@/contexts/toast-context";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { isRenameableWorkspaceTab } from "@/screens/workspace/workspace-tab-menu";
+import { WorkspaceTabPresentationResolver } from "@/screens/workspace/workspace-tab-presentation";
+import { useWorkspaceActiveTab } from "@/components/sidebar/use-workspace-active-tab";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import { useAppSettings } from "@/hooks/use-settings";
@@ -55,6 +67,7 @@ const ThemedCopy = withUnistyles(Copy);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedCircle = withUnistyles(Circle);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedPencilLine = withUnistyles(PencilLine);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
@@ -62,6 +75,7 @@ const ThemedTag = withUnistyles(Tag);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
+const useTabNameLeadingIcon = <ThemedPencilLine size={14} uniProps={foregroundMutedColorMapping} />;
 const markAsReadLeadingIcon = (
   <ThemedCircleCheck size={14} uniProps={foregroundMutedColorMapping} />
 );
@@ -127,6 +141,82 @@ function WorkspaceMenuItem({
   return <DropdownMenuItem {...props}>{children}</DropdownMenuItem>;
 }
 
+/**
+ * Renames the workspace after the tab it currently shows. Only agent and terminal tabs carry a
+ * user-set name; every other tab's label is a fixed panel name, which is no name for a workspace.
+ */
+function SidebarWorkspaceUseTabNameItem({
+  surface,
+  workspaceKey,
+  serverId,
+  workspaceId,
+}: {
+  surface: MenuSurface;
+  workspaceKey: string;
+  serverId: string;
+  workspaceId: string;
+}): ReactNode {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const tab = useWorkspaceActiveTab({ serverId, workspaceId });
+  const renameTo = useCallback(
+    (title: string) => {
+      const client = getHostRuntimeStore().getClient(serverId);
+      if (!client) {
+        toast.error(t("sidebar.workspace.toasts.hostDisconnected"));
+        return;
+      }
+      void client.setWorkspaceTitle(workspaceId, title).catch((error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : t("sidebar.workspace.toasts.renameFailed"),
+        );
+      });
+    },
+    [serverId, t, toast, workspaceId],
+  );
+  if (!tab || !isRenameableWorkspaceTab(tab)) {
+    return null;
+  }
+  return (
+    <WorkspaceTabPresentationResolver tab={tab} serverId={serverId} workspaceId={workspaceId}>
+      {(presentation) => (
+        <UseTabNameMenuItem
+          surface={surface}
+          workspaceKey={workspaceKey}
+          title={presentation.titleState === "ready" ? presentation.label.trim() : ""}
+          onRenameTo={renameTo}
+        />
+      )}
+    </WorkspaceTabPresentationResolver>
+  );
+}
+
+function UseTabNameMenuItem({
+  surface,
+  workspaceKey,
+  title,
+  onRenameTo,
+}: {
+  surface: MenuSurface;
+  workspaceKey: string;
+  title: string;
+  onRenameTo: (title: string) => void;
+}): ReactNode {
+  const { t } = useTranslation();
+  const handleSelect = useCallback(() => onRenameTo(title), [onRenameTo, title]);
+  return (
+    <WorkspaceMenuItem
+      surface={surface}
+      testID={`sidebar-workspace-menu-use-tab-name-${workspaceKey}`}
+      leading={useTabNameLeadingIcon}
+      disabled={title.length === 0}
+      onSelect={handleSelect}
+    >
+      {t("sidebar.workspace.actions.useTabName")}
+    </WorkspaceMenuItem>
+  );
+}
+
 function SidebarWorkspaceMenuItems({
   surface,
   workspaceKey,
@@ -187,6 +277,14 @@ function SidebarWorkspaceMenuItems({
         >
           {t("sidebar.workspace.actions.rename")}
         </WorkspaceMenuItem>
+      ) : null}
+      {onRename && serverId && workspaceId ? (
+        <SidebarWorkspaceUseTabNameItem
+          surface={surface}
+          workspaceKey={workspaceKey}
+          serverId={serverId}
+          workspaceId={workspaceId}
+        />
       ) : null}
       {onMarkAsRead ? (
         <WorkspaceMenuItem
