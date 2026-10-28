@@ -1,0 +1,14 @@
+# Developer build that installs next to the production app without colliding with
+# it in macOS Launch Services: a distinct bundle id so notification clicks, Dock
+# activation, and relaunches target this copy, and no paseo:// registration so deep
+# links keep going to production. Everything else — product name, userData, and so
+# the single-instance lock — is shared, so only one of the two runs at a time.
+extends: ./electron-builder.base.yml
+appId: sh.paseo.desktop.dev
+productName: Paseo
+directories:
+  output: dev
+mac:
+  # The names match, so the icon is the one visible difference in the Dock and
+  # Finder. electron-builder converts the PNG to .icns at build time.
+  icon: assets/icon-dev.png
