@@ -1544,6 +1544,18 @@ export const ko: TranslationResources = {
         failed: "알림을 보내지 못했습니다.",
       },
     },
+    notifications: {
+      event: {
+        finished: "완료",
+        error: "오류",
+        permission: "권한: {{name}}",
+        permissionUnnamed: "권한 요청",
+        question: "질문: {{name}}",
+        questionUnnamed: "질문",
+        plan: "계획 승인: {{name}}",
+        planUnnamed: "계획 승인",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "CLI 설치 상태를 확인할 수 없습니다.",

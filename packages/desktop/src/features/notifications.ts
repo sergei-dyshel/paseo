@@ -5,7 +5,10 @@ import { getDesktopSettingsStore } from "../settings/desktop-settings-electron.j
 
 interface NotificationInput {
   title?: unknown;
+  subtitle?: unknown;
   body?: unknown;
+  groupId?: unknown;
+  id?: unknown;
   data?: unknown;
 }
 
@@ -121,13 +124,19 @@ export function registerNotificationHandlers(): void {
       return false;
     }
 
+    const subtitle = toTrimmedString(rawInput?.subtitle) ?? undefined;
     const body = toTrimmedString(rawInput?.body) ?? undefined;
+    const groupId = toTrimmedString(rawInput?.groupId) ?? undefined;
+    const id = toTrimmedString(rawInput?.id) ?? undefined;
     const data = toRecord(rawInput?.data);
     const icon = getNotificationIcon();
     const settings = await getDesktopSettingsStore().get();
     const notification = new Notification({
       title,
+      ...(subtitle ? { subtitle } : {}),
       ...(body ? { body } : {}),
+      ...(groupId ? { groupId } : {}),
+      ...(id ? { id } : {}),
       ...(icon ? { icon } : {}),
       silent: !settings.notifications.playSound,
     });

@@ -1535,6 +1535,18 @@ export const ar: TranslationResources = {
         failed: "فشل في إرسال الإخطار.",
       },
     },
+    notifications: {
+      event: {
+        finished: "انتهى",
+        error: "خطأ",
+        permission: "إذن: {{name}}",
+        permissionUnnamed: "طلب إذن",
+        question: "سؤال: {{name}}",
+        questionUnnamed: "سؤال",
+        plan: "الموافقة على الخطة: {{name}}",
+        planUnnamed: "الموافقة على الخطة",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "غير قادر على التحقق من حالة تثبيت CLI.",

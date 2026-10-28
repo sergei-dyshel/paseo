@@ -1562,6 +1562,18 @@ export const ru: TranslationResources = {
         failed: "Не удалось отправить уведомление.",
       },
     },
+    notifications: {
+      event: {
+        finished: "Завершено",
+        error: "Ошибка",
+        permission: "Разрешение: {{name}}",
+        permissionUnnamed: "Запрос разрешения",
+        question: "Вопрос: {{name}}",
+        questionUnnamed: "Вопрос",
+        plan: "Утверждение плана: {{name}}",
+        planUnnamed: "Утверждение плана",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "Не удалось проверить состояние установки CLI.",

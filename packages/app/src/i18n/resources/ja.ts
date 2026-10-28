@@ -1551,6 +1551,18 @@ export const ja: TranslationResources = {
         failed: "通知の送信に失敗しました。",
       },
     },
+    notifications: {
+      event: {
+        finished: "完了",
+        error: "エラー",
+        permission: "許可: {{name}}",
+        permissionUnnamed: "許可リクエスト",
+        question: "質問: {{name}}",
+        questionUnnamed: "質問",
+        plan: "プラン承認: {{name}}",
+        planUnnamed: "プラン承認",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "CLIのインストール状態を確認できません。",

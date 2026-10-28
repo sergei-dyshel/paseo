@@ -1580,6 +1580,18 @@ export const es: TranslationResources = {
         failed: "No se pudo enviar la notificación.",
       },
     },
+    notifications: {
+      event: {
+        finished: "Terminado",
+        error: "Error",
+        permission: "Permiso: {{name}}",
+        permissionUnnamed: "Solicitud de permiso",
+        question: "Pregunta: {{name}}",
+        questionUnnamed: "Pregunta",
+        plan: "Aprobación del plan: {{name}}",
+        planUnnamed: "Aprobación del plan",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "No se puede verificar el estado de instalación deCLI.",

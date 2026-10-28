@@ -1576,6 +1576,18 @@ export const fr: TranslationResources = {
         failed: "Échec de l’envoi de la notification.",
       },
     },
+    notifications: {
+      event: {
+        finished: "Terminé",
+        error: "Erreur",
+        permission: "Autorisation : {{name}}",
+        permissionUnnamed: "Demande d'autorisation",
+        question: "Question : {{name}}",
+        questionUnnamed: "Question",
+        plan: "Validation du plan : {{name}}",
+        planUnnamed: "Validation du plan",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "Impossible de vérifier l’installation de la CLI.",

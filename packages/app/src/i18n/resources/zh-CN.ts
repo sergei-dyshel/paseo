@@ -1519,6 +1519,18 @@ export const zhCN: TranslationResources = {
         failed: "发送通知失败。",
       },
     },
+    notifications: {
+      event: {
+        finished: "已完成",
+        error: "错误",
+        permission: "权限：{{name}}",
+        permissionUnnamed: "权限请求",
+        question: "提问：{{name}}",
+        questionUnnamed: "提问",
+        plan: "计划审批：{{name}}",
+        planUnnamed: "计划审批",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "无法检查 CLI 安装状态。",

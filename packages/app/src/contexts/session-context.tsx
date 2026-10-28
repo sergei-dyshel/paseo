@@ -11,18 +11,17 @@ import {
   createSetAgentInitializing,
   refreshAgentInitializationTimeout,
 } from "@/hooks/use-agent-initialization";
-import type { StreamItem } from "@/types/stream";
+
 import { deriveAgentStreamTurnLiveness } from "@/timeline/session-stream-reducers";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import { requestTimelineReplacement } from "@/timeline/timeline-replacement";
 import { type ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { parseServerInfoStatusPayload } from "@getpaseo/protocol/messages";
-import {
-  buildAgentAttentionNotificationPayload,
-  type AgentAttentionReason,
-  type AgentAttentionNotificationPayload,
-  type NotificationPermissionRequest,
+import type {
+  AgentAttentionReason,
+  AgentAttentionNotificationPayload,
+  NotificationPermissionRequest,
 } from "@getpaseo/protocol/agent-attention-notification";
 
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -36,7 +35,10 @@ import {
   useSessionStore,
   type SessionState,
 } from "@/stores/session-store";
-import { sendOsNotification } from "@/utils/os-notifications";
+import { sendOsNotification, type OsNotificationPayload } from "@/utils/os-notifications";
+import { buildAgentAttentionNotificationText } from "@/utils/agent-attention-notification-text";
+import { resolveAgentLabel } from "@/agent-presentation";
+import { selectWorkspace } from "@/stores/session-store-hooks/selectors";
 import { getIsAppActivelyVisible, getIsAppVisible } from "@/utils/app-visibility";
 import {
   getInitKey,
@@ -99,16 +101,6 @@ function buildAudioPlaybackSource(chunks: BufferedAudioChunk[]): AudioPlaybackSo
   };
 }
 
-const findLatestAssistantMessageText = (items: StreamItem[]): string | null => {
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    const item = items[i];
-    if (item.kind === "assistant_message") {
-      return item.text;
-    }
-  }
-  return null;
-};
-
 const getLatestPermissionRequest = (
   session: SessionState | undefined,
   agentId: string,
@@ -135,33 +127,49 @@ const getLatestPermissionRequest = (
   return null;
 };
 
-interface AgentAttentionNotificationInput {
-  notification?: AgentAttentionNotificationPayload;
-  reason: AgentAttentionReason;
-  serverId: string;
-  workspaceId: string | undefined;
+interface AgentAttentionEvent {
   agentId: string;
-  assistantMessage: string | null;
-  permissionRequest: NotificationPermissionRequest | null;
+  reason: AgentAttentionReason;
+  notification?: AgentAttentionNotificationPayload;
 }
 
-function resolveAgentAttentionNotification(
-  input: AgentAttentionNotificationInput,
-): AgentAttentionNotificationPayload | null {
-  if (input.notification) {
-    return input.notification.data.workspaceId ? input.notification : null;
-  }
-  if (!input.workspaceId) {
+/**
+ * The daemon's notification body previews the agent's last message, which is what
+ * mobile push shows. The desktop names where the agent lives and what it wants, from
+ * the records the renderer already holds. The daemon's `data` is kept because click
+ * routing reads serverId/workspaceId/agentId from it.
+ */
+function buildAgentAttentionOsNotification(
+  serverId: string,
+  session: SessionState | undefined,
+  event: AgentAttentionEvent,
+): OsNotificationPayload | null {
+  const agent = session?.agents.get(event.agentId) ?? session?.agentDetails.get(event.agentId);
+  const workspaceId = agent?.workspaceId ?? event.notification?.data.workspaceId;
+  if (!workspaceId) {
     return null;
   }
-  return buildAgentAttentionNotificationPayload({
-    reason: input.reason,
-    serverId: input.serverId,
-    workspaceId: input.workspaceId,
-    agentId: input.agentId,
-    assistantMessage: input.reason === "finished" ? input.assistantMessage : null,
-    permissionRequest: input.reason === "permission" ? input.permissionRequest : null,
+  const workspace = selectWorkspace(useSessionStore.getState(), serverId, workspaceId);
+  const text = buildAgentAttentionNotificationText({
+    serverId,
+    agentId: event.agentId,
+    workspaceId,
+    reason: event.reason,
+    tabName: resolveAgentLabel(agent?.title),
+    workspaceName: workspace?.name ?? null,
+    projectName: workspace?.projectCustomName ?? workspace?.projectDisplayName ?? null,
+    permissionRequest:
+      event.reason === "permission" ? getLatestPermissionRequest(session, event.agentId) : null,
   });
+  return {
+    ...text,
+    data: event.notification?.data ?? {
+      serverId,
+      workspaceId,
+      agentId: event.agentId,
+      reason: event.reason,
+    },
+  };
 }
 
 function notifyVoiceAbortFailure(
@@ -280,31 +288,10 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       }
       attentionNotifiedRef.current.set(params.agentId, timestampMs);
 
-      const head = session?.agentStreamHead.get(params.agentId) ?? [];
-      const tail = session?.agentStreamTail.get(params.agentId) ?? [];
-      const assistantMessage =
-        findLatestAssistantMessageText(head) ?? findLatestAssistantMessageText(tail);
-      const permissionRequest = getLatestPermissionRequest(session, params.agentId);
-      const workspaceId = session?.agents?.get(params.agentId)?.workspaceId;
-
-      const notification = resolveAgentAttentionNotification({
-        notification: params.notification,
-        reason: params.reason,
-        serverId,
-        workspaceId,
-        agentId: params.agentId,
-        assistantMessage,
-        permissionRequest,
-      });
-      if (!notification) {
-        return;
+      const notification = buildAgentAttentionOsNotification(serverId, session, params);
+      if (notification) {
+        void sendOsNotification(notification);
       }
-
-      void sendOsNotification({
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-      });
     },
     [serverId],
   );

@@ -1559,6 +1559,18 @@ export const en = {
         failed: "Failed to send notification.",
       },
     },
+    notifications: {
+      event: {
+        finished: "Finished",
+        error: "Error",
+        permission: "Permission: {{name}}",
+        permissionUnnamed: "Permission request",
+        question: "Question: {{name}}",
+        questionUnnamed: "Question",
+        plan: "Plan approval: {{name}}",
+        planUnnamed: "Plan approval",
+      },
+    },
     integrations: {
       cli: {
         statusFailed: "Unable to check CLI install status.",
