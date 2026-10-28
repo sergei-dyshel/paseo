@@ -5,6 +5,10 @@
 - Node.js (see `.tool-versions` for exact version)
 - npm workspaces (comes with Node)
 
+Use the pinned Node. A newer npm rewrites `package-lock.json` on install (it drops the
+`"peer": true` flags, several hundred lines); that churn is cosmetic, so revert it rather than
+commit it.
+
 ## Running the dev server
 
 ```bash
@@ -552,7 +556,12 @@ runs when its package is actually present, so add the package to that script's `
 list when you introduce a new patch — otherwise the file sits in `patches/` and never applies.
 patch-package cannot apply a patch that changed after an earlier version was applied, so the
 script removes that package and fails the install; the next `npm install` reinstalls it clean
-with the current patch. Regenerate a patch with `npx patch-package <package>` after editing `node_modules/<package>`, and
+with the current patch. After pulling a commit that touches `patches/`, expect exactly that:
+the first `npm install` fails on `scripts/postinstall-patches.mjs` and the second succeeds.
+npm's debug log records only the exit code, not the script's output. To reproduce the script
+outside an install, run `npm exec --no -- node scripts/postinstall-patches.mjs`; a bare
+`node scripts/...` fails with `spawnSync patch-package ENOENT` because `node_modules/.bin`
+is on `PATH` only inside npm lifecycle scripts. Regenerate a patch with `npx patch-package <package>` after editing `node_modules/<package>`, and
 patch every build the consumers use: Metro resolves the `react-native` field of a package
 (`src/*.ts` for `react-native-svg`), while Node and Vitest resolve `main`/`module`
 (`lib/commonjs`, `lib/module`). Patching only `lib/` leaves the app bundle unfixed.
@@ -678,3 +687,7 @@ Always run typecheck after changes:
 ```bash
 npm run typecheck
 ```
+
+The pre-commit hook (`lefthook.yml`) runs the format check and lint on staged files and the
+repo-wide typecheck on every commit, so each commit in a series must compile on its own. Run
+the same checks without committing with `npx lefthook run pre-commit`.

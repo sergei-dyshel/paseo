@@ -46,6 +46,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/service-proxy.md](docs/service-proxy.md)                       | Service proxy: exposing workspace scripts at public URLs, DNS setup, reverse proxy config                                      |
 | [docs/relay-endpoint-security.md](docs/relay-endpoint-security.md)   | Relay E2EE modes: Noise NK mapping, record framing, negotiation, the `requireProtectedSecurity` flag, close codes              |
 | [docs/development.md](docs/development.md)                           | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                     |
+| [docs/desktop-debugging.md](docs/desktop-debugging.md)               | Desktop log locations and formats, tracing a notification through daemon/Electron/macOS, bundle-id collisions                  |
 | [docs/rpc-namespacing.md](docs/rpc-namespacing.md)                   | WebSocket RPC naming convention — dotted namespaces and `.request`/`.response` pairs                                           |
 | [docs/protocol-compatibility.md](docs/protocol-compatibility.md)     | Why app/daemon versions drift, protocol vs feature contract, capability gating, COMPAT tagging                                 |
 | [docs/protocol-validation.md](docs/protocol-validation.md)           | zod-aot generated inbound WebSocket validation, patched compiler regressions, schema-purity rules                              |
@@ -122,9 +123,25 @@ retarget the PR to `next` and preserve that destination through delivery. Follow
 [release branch discipline](docs/release.md#release-branch-discipline) for creating
 and updating `next`, integrating it after a release, and releasing a hotfix from a tag.
 
+## Working with the user
+
+- **Do not commit without confirmation.** When the work is ready, stop and present it:
+  the list of changed files with links to the changed code, the behaviour change in one
+  or two sentences, and the full text of every test you added or changed, quoted as a
+  code block. Commit only after the user says so. Commits that the user explicitly asked
+  for in the same message ("fix X and commit") are the exception.
+- **Propose instruction edits as you go.** When you learn something this file or `docs/`
+  should have told you, propose the edit in the same reply as the work it came from, as a
+  quoted diff of the lines you would change. Do not save it for the end, and do not keep
+  it in a private note.
+- **Never create memory files.** Knowledge about this repository lives in this file and in
+  `docs/`, where every contributor and every agent reads it. A private note is a note the
+  next agent does not have.
+
 ## Critical rules
 
 - **NEVER restart the main Paseo daemon on port 6767 without permission** — it manages all running agents. If you're an agent, restarting it kills your own process.
+- **NEVER launch a built desktop app (`open Paseo.app`, running its binary) without asking.** It takes focus from the user's running instance and competes for the single-instance lock. Verify bundles statically; see [docs/desktop-debugging.md](docs/desktop-debugging.md#inspecting-a-built-bundle).
 - **NEVER assume a timeout means the service needs restarting** — timeouts can be transient.
 - **NEVER add auth checks to tests** — agent providers handle their own auth.
 - **Before changing app routes, startup routing, remembered workspace restore, or active workspace selection, read [docs/expo-router.md](docs/expo-router.md).**
@@ -200,4 +217,4 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 
 ## Debugging
 
-Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
+Find the complete daemon logs and traces in `$PASEO_HOME/daemon.log` (`~/.paseo` for the packaged app, `.dev/paseo-home` for `npm run dev`). The file mixes JSON and ANSI-colored pretty lines, and steady-state traffic appears only as 30-second `ws_runtime_metrics` summaries. [docs/desktop-debugging.md](docs/desktop-debugging.md) has the log map, how to strip and read it, and how to follow one notification from daemon to macOS.
