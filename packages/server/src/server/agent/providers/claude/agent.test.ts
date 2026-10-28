@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import pino from "pino";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PermissionResult, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
@@ -3923,6 +3923,273 @@ describe("ClaudeAgentSession context window usage", () => {
         messageId: "assistant-third-party-1",
       },
     ]);
+  });
+
+  describe("/rename", () => {
+    const sessionId = "session-renamed";
+    const cwd = process.cwd();
+    let configDir: string;
+
+    // Claude Code appends `custom-title` to the transcript, then streams a synthetic assistant
+    // message and a zero-token result. The fake query reproduces the stream; the test writes the
+    // transcript the CLI would have written.
+    function renameTurn(): Array<Record<string, unknown>> {
+      return [
+        createInitMessage(sessionId),
+        {
+          type: "assistant",
+          message: {
+            id: "assistant-rename-1",
+            role: "assistant",
+            model: "<synthetic>",
+            content: [{ type: "text", text: "Session renamed to: Billing rework" }],
+            usage: { input_tokens: 0, output_tokens: 0 },
+          },
+          session_id: sessionId,
+          uuid: "assistant-rename-event-1",
+        },
+        createSuccessResult({
+          num_turns: 0,
+          result: "Session renamed to: Billing rework",
+          usage: { input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+          uuid: "result-rename-1",
+          session_id: sessionId,
+        }),
+      ];
+    }
+
+    async function writeTranscript(records: Array<Record<string, unknown>>): Promise<void> {
+      const projectDir = claudeProjectDirSync(cwd, { configDir });
+      await fs.mkdir(projectDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectDir, `${sessionId}.jsonl`),
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      );
+    }
+
+    async function createRenameSession(
+      turns: Array<Array<Record<string, unknown>>>,
+    ): Promise<AgentSession> {
+      const client = new ClaudeAgentClient({
+        logger,
+        queryFactory: createQueryFactoryForTurns(turns),
+        resolveBinary: async () => "/test/claude/bin",
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
+      });
+      return await client.createSession({ provider: "claude", cwd });
+    }
+
+    interface ResumedRenameSession {
+      session: AgentSession;
+      events: AgentStreamEvent[];
+    }
+
+    async function resumeRenameSession(
+      metadata: Record<string, unknown>,
+    ): Promise<ResumedRenameSession> {
+      const client = new ClaudeAgentClient({
+        logger,
+        resolveBinary: async () => "/test/claude/bin",
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
+      });
+      const session = await client.resumeSession({
+        provider: "claude",
+        sessionId,
+        nativeHandle: sessionId,
+        metadata: { provider: "claude", cwd, ...metadata },
+      });
+      const events: AgentStreamEvent[] = [];
+      session.subscribe(collectInto(events));
+      return { session, events };
+    }
+
+    function collectInto(events: AgentStreamEvent[]): (event: AgentStreamEvent) => void {
+      return (event) => events.push(event);
+    }
+
+    function titleChanges(events: AgentStreamEvent[]): string[] {
+      return events.flatMap((event) => (event.type === "title_changed" ? [event.title] : []));
+    }
+
+    function eventTypes(events: AgentStreamEvent[]): string[] {
+      return events.map((event) => event.type);
+    }
+
+    function assistantTexts(events: AgentStreamEvent[]): string[] {
+      return events.flatMap((event) =>
+        event.type === "timeline" && event.item.type === "assistant_message"
+          ? [event.item.text]
+          : [],
+      );
+    }
+
+    beforeEach(async () => {
+      configDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-live-rename-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(configDir, { recursive: true, force: true });
+    });
+
+    test("emits the transcript's custom-title before the turn completes", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+        { type: "agent-name", agentName: "Billing rework", sessionId },
+      ]);
+      const session = await createRenameSession([renameTurn()]);
+      try {
+        const events = await collectStreamEvents(session, "/rename Billing rework");
+        expect(titleChanges(events)).toEqual(["Billing rework"]);
+        const types = eventTypes(events);
+        expect(types.indexOf("title_changed")).toBeLessThan(types.indexOf("turn_completed"));
+        // The CLI's confirmation streams once as a synthetic assistant message; the zero-token
+        // result text must not repeat it.
+        expect(assistantTexts(events)).toEqual(["Session renamed to: Billing rework"]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("uses the last custom-title and skips sidechain records", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Invoices", sessionId },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+        { type: "custom-title", customTitle: "Subagent title", sessionId, isSidechain: true },
+      ]);
+      const session = await createRenameSession([renameTurn()]);
+      try {
+        const events = await collectStreamEvents(session, "/rename Billing rework");
+        expect(titleChanges(events)).toEqual(["Billing rework"]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("does not read the transcript for an ordinary turn", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Stale rename from another client", sessionId },
+      ]);
+      const session = await createRenameSession([
+        [createInitMessage(sessionId), createSuccessResult({ session_id: sessionId })],
+      ]);
+      try {
+        const events = await collectStreamEvents(session, "continue the review");
+        expect(titleChanges(events)).toEqual([]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("emits nothing when the transcript holds no custom-title", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+      ]);
+      const session = await createRenameSession([renameTurn()]);
+      try {
+        const events = await collectStreamEvents(session, "/rename Billing rework");
+        expect(titleChanges(events)).toEqual([]);
+        expect(eventTypes(events)).toContain("turn_completed");
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("records the applied title in the persistence handle", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+      ]);
+      const session = await createRenameSession([renameTurn()]);
+      try {
+        await collectStreamEvents(session, "/rename Billing rework");
+        expect(session.describePersistence()?.metadata).toMatchObject({
+          customTitle: "Billing rework",
+        });
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("resume reports a rename made while Paseo was not attached", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Renamed in a terminal", sessionId },
+      ]);
+      const { session, events } = await resumeRenameSession({});
+      try {
+        expect(titleChanges(events)).toEqual(["Renamed in a terminal"]);
+        expect(session.describePersistence()?.metadata).toMatchObject({
+          customTitle: "Renamed in a terminal",
+        });
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("resume stays quiet for a rename it already applied", async () => {
+      // Paseo may have renamed the agent since; re-applying the transcript title would undo
+      // that, and the record is re-emitted on every save so it says nothing by itself.
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+      ]);
+      const { session, events } = await resumeRenameSession({ customTitle: "Billing rework" });
+      try {
+        expect(titleChanges(events)).toEqual([]);
+        expect(session.describePersistence()?.metadata).toMatchObject({
+          customTitle: "Billing rework",
+        });
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("resume reports a newer rename over the one it applied", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Billing rework", sessionId },
+        { type: "custom-title", customTitle: "Invoices v2", sessionId },
+      ]);
+      const { session, events } = await resumeRenameSession({ customTitle: "Billing rework" });
+      try {
+        expect(titleChanges(events)).toEqual(["Invoices v2"]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("resume delivers the rename to the first subscriber only", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+        { type: "custom-title", customTitle: "Renamed in a terminal", sessionId },
+      ]);
+      const { session, events } = await resumeRenameSession({});
+      try {
+        const later: AgentStreamEvent[] = [];
+        session.subscribe(collectInto(later));
+        expect(titleChanges(events)).toEqual(["Renamed in a terminal"]);
+        expect(later).toEqual([]);
+      } finally {
+        await session.close();
+      }
+    });
+
+    test("resume stays quiet when the transcript has no custom-title", async () => {
+      await writeTranscript([
+        { type: "user", sessionId, cwd, message: { role: "user", content: "Review billing" } },
+      ]);
+      const { session, events } = await resumeRenameSession({});
+      try {
+        expect(titleChanges(events)).toEqual([]);
+        expect(session.describePersistence()?.metadata).not.toHaveProperty("customTitle");
+      } finally {
+        await session.close();
+      }
+    });
   });
 });
 

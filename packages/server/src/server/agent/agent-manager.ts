@@ -2117,6 +2117,11 @@ export class AgentManager {
     ) {
       return;
     }
+    // The provider's handle records the title it last applied, so the same snapshot write
+    // carries both and a later resume knows which native rename was already seen.
+    if (agent.session) {
+      this.refreshSessionPersistence(agent);
+    }
     this.touchUpdatedAt(agent);
     await this.persistSnapshot(agent, { title: normalizedTitle });
     this.emitState(agent, { persist: false });
@@ -4467,6 +4472,9 @@ export class AgentManager {
         flags.shouldDispatchEvent = false;
         this.emitState(agent);
         return undefined;
+      case "title_changed":
+        flags.shouldDispatchEvent = false;
+        return this.setTitle(agent.id, event.title);
       case "timeline":
         return this.onStreamTimelineEvent({ agent, event, options, flags });
       case "turn_completed":

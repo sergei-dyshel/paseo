@@ -422,6 +422,11 @@ export type AgentStreamEvent =
       provider: AgentProvider;
       thinkingOptionId: string | null;
     }
+  /**
+   * The provider's own session was renamed from inside the session (Claude Code `/rename`).
+   * The agent manager applies it to the stored agent title; it never reaches the wire.
+   */
+  | { type: "title_changed"; provider: AgentProvider; title: string }
   | {
       type: "turn_failed";
       provider: AgentProvider;

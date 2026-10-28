@@ -5136,6 +5136,116 @@ test("session config drift events update state through the stream channel", asyn
   expect(persisted?.config?.modeId).toBe("build");
 });
 
+test("a provider title_changed event replaces the stored title and stays off the stream", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-changed-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let capturedSession: TestAgentSession | null = null;
+  class TitleEventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new TestAgentSession(config);
+      return capturedSession;
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new TitleEventClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000135",
+  });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await manager.setTitle(snapshot.id, "Review billing");
+    const streams: AgentStreamEvent[] = [];
+    let stateEmissions = 0;
+    manager.subscribe(
+      (event) => {
+        if (event.type === "agent_stream") {
+          streams.push(event.event);
+        } else if (event.type === "agent_state") {
+          stateEmissions += 1;
+        }
+      },
+      { agentId: snapshot.id, replayState: false },
+    );
+
+    capturedSession?.pushEvent({
+      type: "title_changed",
+      provider: "codex",
+      title: "Billing rework",
+    });
+    await manager.flush();
+
+    expect((await storage.get(snapshot.id))?.title).toBe("Billing rework");
+    // Clients learn the new title from the snapshot, not from a stream frame.
+    expect(stateEmissions).toBeGreaterThan(0);
+    expect(streams.map((event) => event.type)).toEqual([]);
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("a title_changed reported at resume lands in storage with the provider's refreshed handle", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-changed-resume-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  // Stands in for a provider that finds its native session renamed while Paseo was detached
+  // and reports it to the first subscriber, recording the applied title in its handle.
+  class RenamedOnResumeSession extends TestAgentSession {
+    private reported = false;
+    override subscribe(callback: (event: AgentStreamEvent) => void): () => void {
+      const unsubscribe = super.subscribe(callback);
+      if (!this.reported) {
+        this.reported = true;
+        this.pushEvent({ type: "title_changed", provider: "codex", title: "Renamed outside" });
+      }
+      return unsubscribe;
+    }
+    override describePersistence() {
+      return {
+        ...super.describePersistence(),
+        metadata: this.reported ? { customTitle: "Renamed outside" } : {},
+      };
+    }
+  }
+  class RenamedOnResumeClient extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      return new RenamedOnResumeSession({ provider: "codex", cwd: config?.cwd ?? workdir });
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new RenamedOnResumeClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000136",
+  });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await manager.setTitle(snapshot.id, "Review billing");
+    await manager.flush();
+
+    await manager.reloadAgentSession(snapshot.id);
+    await manager.flush();
+
+    const stored = await storage.get(snapshot.id);
+    expect(stored?.title).toBe("Renamed outside");
+    expect(stored?.persistence?.metadata).toMatchObject({ customTitle: "Renamed outside" });
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("setLabels merges and persists labels", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-set-labels-"));
   const storagePath = join(workdir, "agents");
