@@ -13,7 +13,30 @@ interface NotificationClickPayload {
   data?: Record<string, unknown>;
 }
 
+export interface DismissableNotification {
+  close(): void;
+}
+
+// Every notification shown and not yet clicked or closed. Each entry removes itself
+// on click/close, so this is the set still sitting in Notification Center.
 const activeNotifications = new Set<Notification>();
+
+/**
+ * Dismiss every outstanding notification. Once the user is looking at the app the
+ * banners are stale: the agent they point at is on screen or one click away.
+ */
+export function dismissAllNotifications(
+  notifications: Set<DismissableNotification> = activeNotifications,
+): number {
+  const pending = [...notifications];
+  notifications.clear();
+  for (const notification of pending) {
+    // `close` also fires the "close" event, whose listener deletes from the set;
+    // clearing first keeps that a no-op instead of mutating during iteration.
+    notification.close();
+  }
+  return pending.length;
+}
 
 function toTrimmedString(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -79,6 +102,11 @@ export function ensureNotificationCenterRegistration(): void {
 }
 
 export function registerNotificationHandlers(): void {
+  // Focusing any Paseo window dismisses the notifications it sent while unfocused.
+  app.on("browser-window-focus", () => {
+    dismissAllNotifications();
+  });
+
   ipcMain.handle("paseo:notification:isSupported", () => {
     return Notification.isSupported();
   });
