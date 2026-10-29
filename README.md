@@ -39,6 +39,32 @@
   <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
 </p>
 
+<!-- fork-changes:start -->
+
+## Fork changes
+
+### Features
+
+- Two-way title sync with Claude Code: `/rename` in Claude renames the Paseo tab, and renaming the tab (menu, `paseo agent update --name`, MCP `update_agent`) renames the Claude session.
+- Double-click an agent or terminal tab, or a sidebar workspace, to rename it.
+- "Use active tab name" workspace action in the workspace context and kebab menus.
+- Desktop notifications name the project, workspace, and tab, and say what the agent wants ("Finished", "Permission: Bash", "Question: AskUserQuestion"); a newer notification replaces the same agent's older one.
+- Notifications fire only while no Paseo window is focused, and are cleared from Notification Center when a window regains focus.
+- Claude Code background tasks (shells, monitors, backgrounded subagents) keep the workspace spinner running after the agent goes idle, and the finished notification ends in "(have BG tasks)".
+
+### Development
+
+- `npm run build:desktop:local` — unsigned macOS build that launches without a Developer ID certificate.
+- `npm run build:desktop:dev` — side-by-side dev build under `sh.paseo.desktop.dev`, so notification clicks and deep links stop opening the installed app.
+- Non-incremental typecheck, so stale `tsgo` caches no longer produce phantom implicit-any errors in untouched packages.
+
+### Cherry-picked from upstream
+
+- Claude SDK processes identify as `CLAUDE_CODE_ENTRYPOINT=Paseo`, so Paseo-started sessions appear in `claude --resume` ([#7976](https://github.com/getpaseo/paseo/pull/7976)).
+- Auto mode is allowed on hosted Claude providers, Bedrock and Vertex ([#6904](https://github.com/getpaseo/paseo/pull/6904)).
+
+<!-- fork-changes:end -->
+
 Paseo is an open source agentic development environment for desktop, mobile, web, and CLI. Open the desktop app and work: agents, editor, terminals, diffs, pull requests, and a browser in one window. Run many agents at once, each in its own worktree, on one machine or several. The mobile app is the full app, native on iOS and Android.
 
 - **Parallel agents:** Run many agents at once, each in its own worktree.

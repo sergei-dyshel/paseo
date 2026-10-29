@@ -4,6 +4,8 @@ Paseo is a mobile app for monitoring and controlling your local AI coding agents
 
 **Supported agents:** Claude Code, Codex, GitHub Copilot, OpenCode, Pi, Antigravity, and Muse Code.
 
+**This checkout is Sergei's personal fork** of [getpaseo/paseo](https://github.com/getpaseo/paseo). `main` is the latest upstream release tag plus his own and cherry-picked commits, rebased onto each new release. The README does not say so; the fork is a fact for agents and contributors, and [docs/fork.md](docs/fork.md) owns it: the rebase procedure and the "Fork changes" section of `README.md`. See [Fork](#fork) below for what every commit owes that section.
+
 ## Repository map
 
 This is an npm workspace monorepo:
@@ -67,6 +69,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/android.md](docs/android.md)                                   | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                       |
 | [docs/docker.md](docs/docker.md)                                     | Running the daemon and bundled web UI in Docker, volumes, agent images, security                                               |
 | [docs/release.md](docs/release.md)                                   | Release playbook, draft releases, completion checklist                                                                         |
+| [docs/fork.md](docs/fork.md)                                         | This fork: branch shape, rebasing onto a new upstream release, maintaining the README "Fork changes" list                      |
 | [docs/terminal-activity.md](docs/terminal-activity.md)               | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                       |
 | [SECURITY.md](SECURITY.md)                                           | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                  |
 | [public-docs/hub/security.md](public-docs/hub/security.md)           | Public Hub guide — trust boundaries, untrusted triggers, provider controls, and output authority                               |
@@ -115,6 +118,26 @@ Repo dev commands use checkout-local state by default. In this checkout, `PASEO_
 When Mo requests an APK, use `npm run build:apk:arm64` for an ARM64 build: writes `artifacts/paseo-dogfood-arm64.apk` with diagnostics without starting a device; `npm run build:apk` builds all four Android architectures.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
+
+## Fork
+
+`README.md` has a `## Fork changes` section between `<!-- fork-changes:start -->` and
+`<!-- fork-changes:end -->`, after the HTML preamble: one bullet per change the fork carries,
+in three groups, **Features**, **Development**, and **Cherry-picked from upstream**.
+
+- **A commit that adds or changes something a user or contributor can see updates the
+  section in the same commit.** Features and behaviour changes go under Features; npm
+  scripts, build variants, and tooling under Development. Docs, tests, formatting, and
+  refactors do not get a bullet.
+- **Cherry-pick with `git cherry-pick -x`**, list it under Cherry-picked whatever its kind,
+  and end the bullet with the upstream PR link.
+- **Never write the upstream version, the fork, or its maintenance into the README.** The
+  base tag comes from git and changes with every rebase; the fork itself is this file's and
+  [docs/fork.md](docs/fork.md)'s subject.
+- **Rebasing onto a new upstream release** follows [docs/fork.md](docs/fork.md): remove
+  bullets for commits the new base made redundant.
+- Bullet style, group definitions, and the verification command are in
+  [docs/fork.md](docs/fork.md#the-fork-changes-section).
 
 ## Release branches
 
