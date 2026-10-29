@@ -4520,6 +4520,9 @@ export class AgentManager {
         break;
       case "model_changed":
         agent.runtimeInfo = event.runtimeInfo;
+        // A provider-side switch must reach the stored config, or reload and resume pin the
+        // creation-time model back onto the session. Mirrors thinking_option_changed.
+        agent.config.model = event.runtimeInfo.model ?? agent.config.model;
         if (!agent.persistence && event.runtimeInfo.sessionId) {
           agent.persistence = attachPersistenceCwd(
             { provider: agent.provider, sessionId: event.runtimeInfo.sessionId },

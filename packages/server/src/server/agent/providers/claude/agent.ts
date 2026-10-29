@@ -45,6 +45,10 @@ import {
   resolveClaudeDisabledThinkingForModel,
 } from "./model-manifest.js";
 import { parsePartialJsonObject } from "./partial-json.js";
+import {
+  ClaudeExternalSessionSettingsTracker,
+  type ClaudeExternalSessionSettings,
+} from "./external-session-settings.js";
 import { withClaudeReplayHistory, type ClaudeReplayHistory } from "./transcript-history.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { readClaudeSubagentHandback } from "./subagent-handback.js";
@@ -1043,6 +1047,11 @@ function coerceSessionMetadata(metadata: AgentMetadata | undefined): Partial<Age
 
 const PERSISTED_CUSTOM_TITLE_KEY = "customTitle";
 
+/** Settings a resumed session took from the transcript instead of from Paseo's record. */
+type ClaudeAdoptedSessionSettings = Partial<
+  Pick<AgentSessionConfig, "modeId" | "model" | "thinkingOptionId">
+>;
+
 function readPersistedCustomTitle(metadata: AgentMetadata | undefined): string | null {
   if (!isMetadata(metadata)) {
     return null;
@@ -1794,13 +1803,31 @@ export class ClaudeAgentClient implements AgentClient {
       sessionId: input.providerHandleId,
       configDir: claudeConfigDir(this.buildProviderEnv(context.launchContext?.env)),
     });
-    return importSessionFromPersistence({
+    const imported = await importSessionFromPersistence({
       provider: "claude",
       request: input,
       context,
       resumeSession: this.resumeSession.bind(this),
       ...(renamedTitle ? { config: { title: renamedTitle } } : {}),
     });
+    // An import has no Paseo record, so the mode, model, and effort the terminal last used are
+    // the agent's. Without this the stored config keeps the catalog defaults the manager filled
+    // in, and the next resume pins those over the session's own.
+    const adopted =
+      imported.session instanceof ClaudeAgentSession
+        ? imported.session.describeAdoptedExternalSettings()
+        : {};
+    if (Object.keys(adopted).length === 0) {
+      return imported;
+    }
+    return {
+      ...imported,
+      config: { ...imported.config, ...adopted },
+      persistence: {
+        ...imported.persistence,
+        metadata: { ...imported.persistence.metadata, ...adopted },
+      },
+    };
   }
 
   async isAvailable(): Promise<boolean> {
@@ -2353,6 +2380,7 @@ class ClaudeAgentSession implements AgentSession {
   private customTitle: string | null = null;
   /** Held for the first subscriber: a rename made while Paseo was not attached. */
   private startupEvents: AgentStreamEvent[] = [];
+  private adoptedExternalSettings: ClaudeAdoptedSessionSettings = {};
   private readonly contextUsage: ClaudeContextUsageState;
   private userMessageIds: string[] = [];
   private readonly emittedUserMessageIds = new Set<string>();
@@ -2380,13 +2408,14 @@ class ClaudeAgentSession implements AgentSession {
     );
     const handle = options.handle;
 
+    let externalSettings: ClaudeExternalSessionSettings | null = null;
     if (handle) {
       if (!handle.sessionId) {
         throw new Error("Cannot resume: persistence handle has no sessionId");
       }
       this.claudeSessionId = handle.sessionId;
       this.persistence = handle;
-      this.loadPersistedHistory(handle.sessionId);
+      externalSettings = this.loadPersistedHistory(handle.sessionId);
       this.observeExternalRename(readPersistedCustomTitle(handle.metadata));
     } else {
       this.claudeSessionId = null;
@@ -2405,6 +2434,94 @@ class ClaudeAgentSession implements AgentSession {
     if (this.currentMode !== "plan") {
       this.planResumeMode = this.currentMode;
     }
+    this.adoptExternalSessionSettings(externalSettings);
+  }
+
+  /**
+   * Mode, model, and effort a terminal `claude --resume` left the session on, when they differ
+   * from what Paseo would pin. Resume and import only: a mid-session rebind must not undo a
+   * change made in Paseo. The manager reads the mode back through `getCurrentMode()` at
+   * registration; model and effort reach it as startup events, like an external rename.
+   */
+  private adoptExternalSessionSettings(external: ClaudeExternalSessionSettings | null): void {
+    if (!external) return;
+    const adopted: ClaudeAdoptedSessionSettings = {};
+    const externalMode = external.modeId ?? undefined;
+    if (isPermissionMode(externalMode) && externalMode !== this.currentMode) {
+      this.currentMode = externalMode;
+      if (externalMode !== "plan") {
+        this.planResumeMode = externalMode;
+      }
+      // The persistence handle is built from config, so it must carry the adopted mode too.
+      this.config.modeId = externalMode;
+      adopted.modeId = externalMode;
+    }
+    if (external.model && external.model !== this.config.model) {
+      this.config.model = external.model;
+      this.contextUsage.setInitialContextWindowMaxTokens(
+        getClaudeContextWindowMaxTokens(external.model),
+      );
+      this.lastOptionsModel = external.model;
+      adopted.model = external.model;
+    }
+    if (
+      isClaudeThinkingEffort(external.effort) &&
+      external.effort !== this.config.thinkingOptionId
+    ) {
+      this.config.thinkingOptionId = external.effort;
+      adopted.thinkingOptionId = external.effort;
+    }
+    // Paseo may have carried disabled thinking onto a model the terminal switched to that
+    // cannot run without it.
+    if (
+      adopted.model !== undefined &&
+      this.config.thinkingOptionId === CLAUDE_DISABLED_THINKING_OPTION_ID
+    ) {
+      const resolution = resolveClaudeDisabledThinkingForModel(this.config.model);
+      if (!resolution.supported) {
+        this.config.thinkingOptionId = resolution.fallbackThinkingOptionId;
+        adopted.thinkingOptionId = resolution.fallbackThinkingOptionId;
+      }
+    }
+    if (Object.keys(adopted).length === 0) return;
+    this.adoptedExternalSettings = adopted;
+    this.persistence = null;
+    this.logger.info(
+      { sessionId: this.claudeSessionId, ...adopted },
+      "Adopted Claude session settings changed outside Paseo",
+    );
+    if (adopted.modeId !== undefined) {
+      this.startupEvents.push({
+        type: "mode_changed",
+        provider: "claude",
+        currentModeId: this.currentMode,
+        availableModes: this.availableModes,
+      });
+    }
+    if (adopted.model !== undefined) {
+      this.startupEvents.push({
+        type: "model_changed",
+        provider: "claude",
+        runtimeInfo: {
+          provider: "claude",
+          sessionId: this.claudeSessionId,
+          model: adopted.model,
+          modeId: this.currentMode,
+        },
+      });
+    }
+    if (adopted.thinkingOptionId !== undefined) {
+      this.startupEvents.push({
+        type: "thinking_option_changed",
+        provider: "claude",
+        thinkingOptionId: adopted.thinkingOptionId ?? null,
+      });
+    }
+  }
+
+  /** What `adoptExternalSessionSettings` changed, for import to write into the stored config. */
+  describeAdoptedExternalSettings(): ClaudeAdoptedSessionSettings {
+    return { ...this.adoptedExternalSettings };
   }
 
   get id(): string | null {
@@ -5381,7 +5498,8 @@ class ClaudeAgentSession implements AgentSession {
     return true;
   }
 
-  private loadPersistedHistory(sessionId: string): void {
+  /** Returns the settings another process left the session on; null without a transcript. */
+  private loadPersistedHistory(sessionId: string): ClaudeExternalSessionSettings | null {
     let historyPath: string | null = null;
     try {
       this.taskState.reset();
@@ -5392,26 +5510,29 @@ class ClaudeAgentSession implements AgentSession {
           { sessionId, cwd: this.config.cwd, historyPath },
           "No Claude transcript to load history from",
         );
-        return;
+        return null;
       }
-      withClaudeReplayHistory(historyPath, (history) => {
+      return withClaudeReplayHistory(historyPath, (history) => {
         const replay = this.ingestPersistedSidechains(history);
-        this.ingestPersistedHistory(history.parentEntries, replay);
+        return this.ingestPersistedHistory(history.parentEntries, replay);
       });
     } catch (error) {
       this.logger.warn(
         { err: error, sessionId, historyPath },
         "Failed to load Claude history from transcript",
       );
+      return null;
     }
   }
 
   private ingestPersistedHistory(
     entries: Iterable<ClaudeHistoryEntry>,
     replay: ClaudeReplayOwnership,
-  ): void {
+  ): ClaudeExternalSessionSettings {
     const timeline: PersistedTimelineEntry[] = [];
+    const externalSettings = new ClaudeExternalSessionSettingsTracker();
     for (const entry of entries) {
+      externalSettings.observe(entry);
       this.ingestPersistedHistoryEntry(entry, timeline, replay);
     }
 
@@ -5419,6 +5540,7 @@ class ClaudeAgentSession implements AgentSession {
       this.persistedHistory = [...this.persistedHistory, ...timeline];
       this.historyPending = true;
     }
+    return externalSettings.result();
   }
 
   private ingestPersistedSidechains(history: ClaudeReplayHistory): ClaudeReplayOwnership {
