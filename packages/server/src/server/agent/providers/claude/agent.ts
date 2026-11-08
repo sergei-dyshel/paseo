@@ -418,6 +418,9 @@ const REWIND_COMMAND: AgentSlashCommand = {
   description: "Rewind tracked files to a previous user message",
   argumentHint: "[user_message_uuid]",
 };
+// Claude Code handles `/rename` itself without a model turn and does not list it in
+// `supportedCommands()`, so it is matched by name here rather than from the catalog.
+const RENAME_COMMAND_NAME = "rename";
 const CLAUDE_ROOT_ONLY_COMMANDS = new Set([
   "clear",
   "compact",
@@ -1093,6 +1096,16 @@ function coerceSessionMetadata(metadata: AgentMetadata | undefined): Partial<Age
   }
 
   return result;
+}
+
+const PERSISTED_CUSTOM_TITLE_KEY = "customTitle";
+
+function readPersistedCustomTitle(metadata: AgentMetadata | undefined): string | null {
+  if (!isMetadata(metadata)) {
+    return null;
+  }
+  const value = metadata[PERSISTED_CUSTOM_TITLE_KEY];
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 export function toClaudeSdkMcpConfig(config: McpServerConfig): ClaudeSdkMcpServerConfig {
@@ -2389,6 +2402,18 @@ class ClaudeAgentSession implements AgentSession {
   private mainTurnInFlight = false;
   private foregroundHasVisibleActivity = false;
   private activeTurnHasAssistantText = false;
+  /** The foreground turn that sent `/rename`; its result is when the transcript holds the name. */
+  private pendingRenameTurnId: string | null = null;
+  /**
+   * The transcript's `custom-title` as Paseo last read it. Claude Code re-emits the record on
+   * every save and `forkSession` writes one for a rewind, so the record alone cannot say whether
+   * a rename is new; only a value that differs from the one persisted with the session is.
+   */
+  private customTitle: string | null = null;
+  /** The title persisted with the resumed handle, compared with the transcript once it loads. */
+  private resumedCustomTitle: string | null = null;
+  /** Held for the first subscriber: a rename made while Paseo was not attached. */
+  private startupEvents: AgentStreamEvent[] = [];
   private readonly contextUsage: ClaudeContextUsageState;
   private userMessageIds: string[] = [];
   private readonly emittedUserMessageIds = new Set<string>();
@@ -2423,6 +2448,7 @@ class ClaudeAgentSession implements AgentSession {
       this.claudeSessionId = handle.sessionId;
       this.persistence = handle;
       this.historySessionId = handle.sessionId;
+      this.resumedCustomTitle = readPersistedCustomTitle(handle.metadata);
     } else {
       this.claudeSessionId = null;
       this.persistence = null;
@@ -2531,6 +2557,7 @@ class ClaudeAgentSession implements AgentSession {
     this.activeForegroundTurnId = turnId;
     this.foregroundHasVisibleActivity = false;
     this.activeTurnHasAssistantText = false;
+    this.pendingRenameTurnId = this.isRenameCommandPrompt(prompt) ? turnId : null;
     this.contextUsage.beginTurn();
     this.transitionTurnState("foreground", "foreground turn started");
     this.clearRecentStderr();
@@ -2657,6 +2684,9 @@ class ClaudeAgentSession implements AgentSession {
 
   subscribe(callback: (event: AgentStreamEvent) => void): () => void {
     this.subscribers.add(callback);
+    const startupEvents = this.startupEvents;
+    this.startupEvents = [];
+    for (const event of startupEvents) this.notifySubscribers(event);
     return () => {
       this.subscribers.delete(callback);
     };
@@ -2977,7 +3007,10 @@ class ClaudeAgentSession implements AgentSession {
       provider: "claude",
       sessionId: this.claudeSessionId,
       nativeHandle: this.claudeSessionId,
-      metadata: { ...persistedConfig },
+      metadata: {
+        ...persistedConfig,
+        ...(this.customTitle ? { [PERSISTED_CUSTOM_TITLE_KEY]: this.customTitle } : {}),
+      },
     };
     return this.persistence;
   }
@@ -3137,6 +3170,66 @@ class ClaudeAgentSession implements AgentSession {
       CLAUDE_ROOT_ONLY_COMMANDS.has(parsed.commandName)
       ? parsed
       : null;
+  }
+
+  private isRenameCommandPrompt(prompt: AgentPromptInput): boolean {
+    return (
+      typeof prompt === "string" &&
+      this.parseSlashCommandInput(prompt)?.commandName === RENAME_COMMAND_NAME
+    );
+  }
+
+  /**
+   * Claude Code appends the `custom-title` record before it streams the `/rename` result, so the
+   * transcript is the source of the new name. Reading it rather than parsing the "Session renamed
+   * to:" text keeps this in step with what import already trusts. The title goes ahead of the
+   * turn's terminal event so the agent is renamed by the time the turn completes.
+   */
+  private async prependRenamedTitleEvent(
+    message: SDKMessage,
+    events: AgentStreamEvent[],
+  ): Promise<void> {
+    const isRenameResult =
+      message.type === "result" &&
+      this.pendingRenameTurnId !== null &&
+      this.pendingRenameTurnId === this.activeForegroundTurnId;
+    if (!isRenameResult) {
+      return;
+    }
+    this.pendingRenameTurnId = null;
+    if (!this.claudeSessionId) {
+      return;
+    }
+    const title = await readClaudeRenamedSessionTitle({
+      cwd: this.config.cwd,
+      sessionId: this.claudeSessionId,
+      configDir: claudeConfigDir(this.harnessEnvironment),
+    });
+    if (title) {
+      this.rememberCustomTitle(title);
+      events.unshift({ type: "title_changed", provider: "claude", title });
+    }
+  }
+
+  /** The persisted handle carries the title, so a change invalidates the cached one. */
+  private rememberCustomTitle(title: string): void {
+    if (this.customTitle === title) {
+      return;
+    }
+    this.customTitle = title;
+    this.persistence = null;
+  }
+
+  /**
+   * A `/rename` run outside Paseo (another `claude --resume`, or this session before Paseo
+   * tracked titles) shows up as a transcript title that differs from the persisted one.
+   */
+  private observeExternalRename(persistedCustomTitle: string | null): void {
+    if (!this.customTitle || this.customTitle === persistedCustomTitle) {
+      return;
+    }
+    this.persistence = null;
+    this.startupEvents.push({ type: "title_changed", provider: "claude", title: this.customTitle });
   }
 
   private parseSlashCommandInput(text: string): SlashCommandInvocation | null {
@@ -3346,6 +3439,7 @@ class ClaudeAgentSession implements AgentSession {
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
     this.taskState.reset();
+    this.customTitle = null;
   }
 
   private rememberUserMessageId(messageId: string | null | undefined): void {
@@ -4352,6 +4446,7 @@ class ClaudeAgentSession implements AgentSession {
     );
 
     const events = await this.buildPumpedMessageEvents(message, identifiers.messageId, turnId);
+    await this.prependRenamedTitleEvent(message, events);
 
     if (events.length === 0) {
       return;
@@ -5378,11 +5473,28 @@ class ClaudeAgentSession implements AgentSession {
 
   ensureHistoryReady(): Promise<void> {
     if (!this.historyReady) {
+      // Only the resumed handle loads here; a rebind or a fresh session sets historyReady itself.
       this.historyReady = this.historySessionId
-        ? this.loadPersistedHistory(this.historySessionId)
+        ? this.loadPersistedHistory(this.historySessionId).then(() =>
+            this.observeExternalRename(this.resumedCustomTitle),
+          )
         : Promise.resolve();
     }
     return this.historyReady;
+  }
+
+  /** Last usable record wins, as in readLastClaudeCustomTitle. */
+  private observeCustomTitleRecord(entry: ClaudeHistoryEntry): boolean {
+    if (entry.type !== CLAUDE_CUSTOM_TITLE_TYPE) {
+      return false;
+    }
+    const title = normalizeClaudeSessionTitle(
+      typeof entry.customTitle === "string" ? entry.customTitle : null,
+    );
+    if (title) {
+      this.customTitle = title;
+    }
+    return true;
   }
 
   private async loadPersistedHistory(sessionId: string): Promise<void> {
@@ -5390,6 +5502,7 @@ class ClaudeAgentSession implements AgentSession {
     this.replayingHistory = true;
     try {
       this.taskState.reset();
+      this.customTitle = null;
       historyPath = await this.resolveHistoryPath(sessionId);
       if (!historyPath || !(await transcriptExists(historyPath))) {
         this.logger.info(
@@ -5485,6 +5598,9 @@ class ClaudeAgentSession implements AgentSession {
     replay: ClaudeReplayOwnership,
   ): Promise<void> {
     if (entry.isSidechain) {
+      return;
+    }
+    if (this.observeCustomTitleRecord(entry)) {
       return;
     }
     const notificationToolUseId = readTaskNotificationToolUseIdFromHistoryRecord(entry);
