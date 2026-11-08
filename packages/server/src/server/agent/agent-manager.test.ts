@@ -5460,6 +5460,7 @@ test("session config drift events update state through the stream channel", asyn
   const agent = manager.getAgent(snapshot.id);
   expect(agent?.currentModeId).toBe("build");
   expect(agent?.config.modeId).toBe("build");
+  expect(agent?.config.model).toBe("gpt-5.4");
   expect(agent?.config.thinkingOptionId).toBe("high");
   expect(agent?.availableModes).toEqual([
     { id: "plan", label: "Plan" },
@@ -5475,6 +5476,7 @@ test("session config drift events update state through the stream channel", asyn
   const persisted = await storage.get(snapshot.id);
   expect(persisted?.lastModeId).toBe("build");
   expect(persisted?.config?.modeId).toBe("build");
+  expect(persisted?.config?.model).toBe("gpt-5.4");
 });
 
 test("a background_tasks_changed event lands on the snapshot and stays off the stream", async () => {
