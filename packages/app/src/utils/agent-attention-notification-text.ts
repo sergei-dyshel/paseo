@@ -23,16 +23,21 @@ export interface AgentAttentionNotificationText {
   id: string;
 }
 
-export interface AgentAttentionNotificationContext {
+export interface AgentAttentionEventDetails {
+  reason: AgentAttentionReason;
+  permissionRequest?: NotificationPermissionRequest | null;
+  /** Background work still running when the turn ended; a finished event says so. */
+  backgroundTaskCount?: number;
+}
+
+export interface AgentAttentionNotificationContext extends AgentAttentionEventDetails {
   serverId: string;
   agentId: string;
   workspaceId: string;
-  reason: AgentAttentionReason;
   /** The agent tab label, already normalized; null when the agent has no title yet. */
   tabName: string | null;
   workspaceName: string | null;
   projectName: string | null;
-  permissionRequest?: NotificationPermissionRequest | null;
 }
 
 const trimToNull = (value: string | null | undefined): string | null => {
@@ -53,16 +58,17 @@ function describePermissionEvent(
     : i18n.t(`desktop.notifications.event.${kind}Unnamed`);
 }
 
-export function describeAgentAttentionEvent(
-  reason: AgentAttentionReason,
-  permissionRequest?: NotificationPermissionRequest | null,
-): string {
-  if (reason === "permission") {
-    return describePermissionEvent(permissionRequest);
+export function describeAgentAttentionEvent(details: AgentAttentionEventDetails): string {
+  if (details.reason === "permission") {
+    return describePermissionEvent(details.permissionRequest);
   }
+  if (details.reason === "error") {
+    return i18n.t("desktop.notifications.event.error");
+  }
+  const hasBackgroundTasks = (details.backgroundTaskCount ?? 0) > 0;
   return i18n.t(
-    reason === "error"
-      ? "desktop.notifications.event.error"
+    hasBackgroundTasks
+      ? "desktop.notifications.event.finishedWithBackgroundTasks"
       : "desktop.notifications.event.finished",
   );
 }
@@ -73,7 +79,7 @@ export function buildAgentAttentionNotificationText(
   const tabName = trimToNull(context.tabName);
   const workspaceName = trimToNull(context.workspaceName);
   const projectName = trimToNull(context.projectName);
-  const event = describeAgentAttentionEvent(context.reason, context.permissionRequest);
+  const event = describeAgentAttentionEvent(context);
 
   // Fall through the chain so the notification always names something the user
   // recognizes even when a record has not been hydrated yet.

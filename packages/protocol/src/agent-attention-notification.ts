@@ -23,7 +23,11 @@ interface BuildAgentAttentionNotificationPayloadInput {
   agentId: string;
   assistantMessage?: string | null;
   permissionRequest?: NotificationPermissionRequest | null;
+  /** Background work still running when the turn ended; the finished body says so. */
+  backgroundTaskCount?: number;
 }
+
+const BACKGROUND_TASKS_SUFFIX = " (have BG tasks)";
 
 export interface NotificationPermissionRequest {
   id: string;
@@ -198,7 +202,11 @@ export function buildAgentAttentionNotificationPayload(
 ): AgentAttentionNotificationPayload {
   const title = resolveAgentAttentionTitle(input.reason);
   const preview = resolveAgentAttentionPreview(input);
-  const body = preview ?? resolveAgentAttentionFallbackBody(input.reason);
+  const hasBackgroundTasks = input.reason === "finished" && (input.backgroundTaskCount ?? 0) > 0;
+  // Appended after truncation so the marker survives a long preview.
+  const body =
+    (preview ?? resolveAgentAttentionFallbackBody(input.reason)) +
+    (hasBackgroundTasks ? BACKGROUND_TASKS_SUFFIX : "");
 
   return {
     title,

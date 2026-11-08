@@ -2894,6 +2894,7 @@ export class VoiceAssistantWebSocketServer {
       agentId: params.agentId,
       assistantMessage,
       permissionRequest: findLatestPermissionRequest(agent.pendingPermissions),
+      backgroundTaskCount: agent.backgroundTaskCount,
     });
 
     const plan = computeNotificationPlan({

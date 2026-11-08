@@ -1542,6 +1542,7 @@ export const ar: TranslationResources = {
     notifications: {
       event: {
         finished: "انتهى",
+        finishedWithBackgroundTasks: "انتهى (توجد مهام في الخلفية)",
         error: "خطأ",
         permission: "إذن: {{name}}",
         permissionUnnamed: "طلب إذن",

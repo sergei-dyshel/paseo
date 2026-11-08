@@ -59,8 +59,10 @@ The daemon's notification title and body preview the agent's last message; that 
 for mobile push. The desktop composes its own text from the records the renderer already
 holds (`packages/app/src/utils/agent-attention-notification-text.ts`): the project name as
 the title, the workspace name as the macOS subtitle when it differs from the tab name, and
-`<tab name>: <event>` as the body, where the event is `Finished` or the permission request's
-kind and tool name (`Permission: Bash`, `Question: AskUserQuestion`). Notifications carry a
+`<tab name>: <event>` as the body, where the event is `Finished`, `Finished (have BG tasks)`
+when the agent's snapshot still reports [background work](agent-lifecycle.md#workspace-activity),
+or the permission request's kind and tool name (`Permission: Bash`, `Question: AskUserQuestion`).
+The daemon appends the same `(have BG tasks)` marker to its push body. Notifications carry a
 `groupId` per workspace so a busy workspace stacks in Notification Center, and an `id` per
 agent so a newer notification replaces that agent's older one. The daemon's `data` is kept
 as-is because click routing reads it. The browser fallback has no subtitle or group, so it

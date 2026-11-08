@@ -118,6 +118,17 @@ const RUNNING_WORKFLOW_TURN_EVENTS = [
   COMPLETED_TURN_EVENTS[2],
 ];
 
+const BACKGROUND_SHELL_TURN_EVENTS = [
+  COMPLETED_TURN_EVENTS[0],
+  {
+    type: "system",
+    subtype: "background_tasks_changed",
+    tasks: [{ task_id: "bash-1", task_type: "local_bash", description: "sleep 5" }],
+  },
+  { type: "assistant", message: { content: "SPAWNED" } },
+  COMPLETED_TURN_EVENTS[2],
+];
+
 const MISSING_RESUMED_CONVERSATION_RESULT = {
   type: "result",
   subtype: "error_during_execution",
@@ -197,6 +208,45 @@ describe("Claude runtime exit", () => {
         .filter((event) => event.type === "upsert" && event.id === "toolu_workflow");
       expect(workflowUpserts[0]).toMatchObject({ title: "Workflow", status: "running" });
       expect(workflowUpserts.at(-1)).toMatchObject({ status: "failed" });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("mirrors the background task set and empties it when the idle process dies", async () => {
+    let capturedOptions: Options | undefined;
+    const queryFactory = vi.fn(({ options }: ClaudeQueryInput) => {
+      capturedOptions = options;
+      return createQueryMock(BACKGROUND_SHELL_TURN_EVENTS);
+    });
+    const child = createChildProcessStub();
+    vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({ provider: "claude", cwd: process.cwd() });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    try {
+      await session.run("start a background shell");
+      capturedOptions?.spawnClaudeCodeProcess?.(SPAWN_OPTIONS);
+
+      const announced = events.find((event) => event.type === "background_tasks_changed");
+      expect(announced).toMatchObject({
+        tasks: [{ taskId: "bash-1", taskType: "local_bash", description: "sleep 5" }],
+      });
+
+      events.length = 0;
+      child.emit("exit", 1, null);
+
+      expect(events).toContainEqual({
+        type: "background_tasks_changed",
+        provider: "claude",
+        tasks: [],
+      });
     } finally {
       await session.close();
     }

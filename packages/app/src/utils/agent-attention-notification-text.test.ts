@@ -75,6 +75,15 @@ describe("buildAgentAttentionNotificationText", () => {
     expect(sameWorkspaceOtherAgent.groupId).toBe(first.groupId);
     expect(sameWorkspaceOtherAgent.id).not.toBe(first.id);
   });
+
+  it("says a finished agent still has background work", () => {
+    expect(buildAgentAttentionNotificationText({ ...base, backgroundTaskCount: 2 }).body).toBe(
+      "fix notifications: Finished (have BG tasks)",
+    );
+    expect(buildAgentAttentionNotificationText({ ...base, backgroundTaskCount: 0 }).body).toBe(
+      "fix notifications: Finished",
+    );
+  });
 });
 
 describe("describeAgentAttentionEvent", () => {
@@ -85,32 +94,48 @@ describe("describeAgentAttentionEvent", () => {
       name,
       kind,
     });
-    expect(describeAgentAttentionEvent("permission", request("question", "AskUserQuestion"))).toBe(
-      "Question: AskUserQuestion",
-    );
-    expect(describeAgentAttentionEvent("permission", request("plan", "ExitPlanMode"))).toBe(
-      "Plan approval: ExitPlanMode",
-    );
-    expect(describeAgentAttentionEvent("permission", request("mode", "Edit"))).toBe(
-      "Permission: Edit",
-    );
+    expect(
+      describeAgentAttentionEvent({
+        reason: "permission",
+        permissionRequest: request("question", "AskUserQuestion"),
+      }),
+    ).toBe("Question: AskUserQuestion");
+    expect(
+      describeAgentAttentionEvent({
+        reason: "permission",
+        permissionRequest: request("plan", "ExitPlanMode"),
+      }),
+    ).toBe("Plan approval: ExitPlanMode");
+    expect(
+      describeAgentAttentionEvent({
+        reason: "permission",
+        permissionRequest: request("mode", "Edit"),
+      }),
+    ).toBe("Permission: Edit");
   });
 
   it("stays generic when the request carries no name", () => {
-    expect(describeAgentAttentionEvent("permission", null)).toBe("Permission request");
+    expect(describeAgentAttentionEvent({ reason: "permission", permissionRequest: null })).toBe(
+      "Permission request",
+    );
     expect(
-      describeAgentAttentionEvent("permission", {
-        id: "p",
-        provider: "codex",
-        name: "  ",
-        kind: "question",
+      describeAgentAttentionEvent({
+        reason: "permission",
+        permissionRequest: { id: "p", provider: "codex", name: "  ", kind: "question" },
       }),
     ).toBe("Question");
   });
 
   it("describes finished and error turns", () => {
-    expect(describeAgentAttentionEvent("finished")).toBe("Finished");
-    expect(describeAgentAttentionEvent("error")).toBe("Error");
+    expect(describeAgentAttentionEvent({ reason: "finished" })).toBe("Finished");
+    expect(describeAgentAttentionEvent({ reason: "error" })).toBe("Error");
+  });
+
+  it("marks a finished turn that left background work running, but not an error", () => {
+    expect(describeAgentAttentionEvent({ reason: "finished", backgroundTaskCount: 1 })).toBe(
+      "Finished (have BG tasks)",
+    );
+    expect(describeAgentAttentionEvent({ reason: "error", backgroundTaskCount: 1 })).toBe("Error");
   });
 
   describe("in another language", () => {
@@ -120,13 +145,16 @@ describe("describeAgentAttentionEvent", () => {
 
     it("translates the event label but leaves the tool name as the provider sent it", async () => {
       await i18n.changeLanguage("ru");
-      expect(describeAgentAttentionEvent("finished")).toBe("Завершено");
+      expect(describeAgentAttentionEvent({ reason: "finished" })).toBe("Завершено");
       expect(
-        describeAgentAttentionEvent("permission", {
-          id: "p",
-          provider: "claude",
-          name: "AskUserQuestion",
-          kind: "question",
+        describeAgentAttentionEvent({
+          reason: "permission",
+          permissionRequest: {
+            id: "p",
+            provider: "claude",
+            name: "AskUserQuestion",
+            kind: "question",
+          },
         }),
       ).toBe("Вопрос: AskUserQuestion");
     });

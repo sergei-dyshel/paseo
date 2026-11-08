@@ -1526,6 +1526,7 @@ export const zhCN: TranslationResources = {
     notifications: {
       event: {
         finished: "已完成",
+        finishedWithBackgroundTasks: "已完成（有后台任务）",
         error: "错误",
         permission: "权限：{{name}}",
         permissionUnnamed: "权限请求",

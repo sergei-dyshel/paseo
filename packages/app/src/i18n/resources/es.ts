@@ -1587,6 +1587,7 @@ export const es: TranslationResources = {
     notifications: {
       event: {
         finished: "Terminado",
+        finishedWithBackgroundTasks: "Terminado (con tareas en segundo plano)",
         error: "Error",
         permission: "Permiso: {{name}}",
         permissionUnnamed: "Solicitud de permiso",

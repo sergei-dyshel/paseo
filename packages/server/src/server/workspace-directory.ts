@@ -286,6 +286,11 @@ export class WorkspaceDirectory {
       descriptorsByWorkspaceId,
       activityEntriesByWorkspaceId,
     });
+    this.applyBackgroundTaskContributions({
+      activeAgents,
+      descriptorsByWorkspaceId,
+      activityEntriesByWorkspaceId,
+    });
 
     const contributingAgentsByWorkspaceId = groupAgentsByWorkspaceId(
       activeAgents,
@@ -340,25 +345,64 @@ export class WorkspaceDirectory {
       if (!parent) {
         continue;
       }
-      const workspaceAgent = resolveWorkspaceRootAgent(parent, activeAgentsById);
-      const workspaceId = workspaceAgent?.workspaceId;
-      if (!workspaceId) {
-        continue;
-      }
-      const descriptor = descriptorsByWorkspaceId.get(workspaceId);
-      if (!descriptor) {
-        continue;
-      }
-      if (
-        getWorkspaceStateBucketPriority("running") <
-        getWorkspaceStateBucketPriority(descriptor.status)
-      ) {
-        descriptor.status = "running";
-      }
-      const entries = activityEntriesByWorkspaceId.get(workspaceId) ?? [];
-      entries.push({ bucket: "running", changedAtIso: subagent.updatedAt });
-      activityEntriesByWorkspaceId.set(workspaceId, entries);
+      this.contributeRunningActivity({
+        workspaceId: resolveWorkspaceRootAgent(parent, activeAgentsById)?.workspaceId,
+        changedAtIso: subagent.updatedAt,
+        descriptorsByWorkspaceId,
+        activityEntriesByWorkspaceId,
+      });
     }
+  }
+
+  // Background shells, monitors and backgrounded subagents keep a provider runtime busy after
+  // its agent went idle, and their completion wakes the agent again. Like a running provider
+  // subagent, that work contributes `running` to the workspace while the agent's own lifecycle
+  // and attention stay literal, so the finished notification still fires.
+  private applyBackgroundTaskContributions(params: {
+    activeAgents: AgentSnapshotPayload[];
+    descriptorsByWorkspaceId: Map<string, WorkspaceDescriptorPayload>;
+    activityEntriesByWorkspaceId: Map<string, WorkspaceBucketTimestampEntry[]>;
+  }): void {
+    const { activeAgents, descriptorsByWorkspaceId, activityEntriesByWorkspaceId } = params;
+    const activeAgentsById = new Map(activeAgents.map((agent) => [agent.id, agent] as const));
+
+    for (const agent of activeAgents) {
+      if ((agent.backgroundTaskCount ?? 0) === 0) {
+        continue;
+      }
+      this.contributeRunningActivity({
+        workspaceId: resolveWorkspaceRootAgent(agent, activeAgentsById)?.workspaceId,
+        changedAtIso: agent.updatedAt,
+        descriptorsByWorkspaceId,
+        activityEntriesByWorkspaceId,
+      });
+    }
+  }
+
+  private contributeRunningActivity(params: {
+    workspaceId: string | undefined;
+    changedAtIso: string;
+    descriptorsByWorkspaceId: Map<string, WorkspaceDescriptorPayload>;
+    activityEntriesByWorkspaceId: Map<string, WorkspaceBucketTimestampEntry[]>;
+  }): void {
+    const { workspaceId, changedAtIso, descriptorsByWorkspaceId, activityEntriesByWorkspaceId } =
+      params;
+    if (!workspaceId) {
+      return;
+    }
+    const descriptor = descriptorsByWorkspaceId.get(workspaceId);
+    if (!descriptor) {
+      return;
+    }
+    if (
+      getWorkspaceStateBucketPriority("running") <
+      getWorkspaceStateBucketPriority(descriptor.status)
+    ) {
+      descriptor.status = "running";
+    }
+    const entries = activityEntriesByWorkspaceId.get(workspaceId) ?? [];
+    entries.push({ bucket: "running", changedAtIso });
+    activityEntriesByWorkspaceId.set(workspaceId, entries);
   }
 
   // Aggregate each agent's state bucket into its owning workspace descriptor,

@@ -258,10 +258,12 @@ interface AgentState {
   id: string;
   status: AgentSnapshotPayload["status"];
   lastUserMessageAt?: string | null;
+  updatedAt?: string;
   archivedAt?: string | null;
   pendingPermissionCount?: number;
   requiresAttention?: boolean;
   attentionReason?: AgentSnapshotPayload["attentionReason"];
+  backgroundTaskCount?: number;
 }
 
 function createAgent(
@@ -277,7 +279,7 @@ function createAgent(
     thinkingOptionId: null,
     effectiveThinkingOptionId: null,
     createdAt: NOW,
-    updatedAt: NOW,
+    updatedAt: input.updatedAt ?? NOW,
     lastUserMessageAt: input.lastUserMessageAt ?? null,
     status: input.status,
     capabilities: {
@@ -307,6 +309,9 @@ function createAgent(
     attentionReason: input.attentionReason ?? null,
     attentionTimestamp: null,
     archivedAt: input.archivedAt ?? null,
+    ...(input.backgroundTaskCount !== undefined
+      ? { backgroundTaskCount: input.backgroundTaskCount }
+      : {}),
   } satisfies AgentSnapshotPayload;
 }
 
@@ -441,6 +446,48 @@ describe("WorkspaceDirectory", () => {
       status: "running",
       statusEnteredAt: "2026-03-01T12:01:00.000Z",
     });
+  });
+
+  test("background tasks keep a finished agent's workspace running", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasRootAgent({
+      id: "root-agent",
+      status: "idle",
+      updatedAt: "2026-03-01T12:01:00.000Z",
+      requiresAttention: true,
+      attentionReason: "finished",
+      backgroundTaskCount: 1,
+    });
+
+    await expect(workspace.workspaceDescriptor()).resolves.toMatchObject({
+      status: "running",
+      statusEnteredAt: "2026-03-01T12:01:00.000Z",
+    });
+  });
+
+  test("background tasks do not outrank a pending permission or an error", async () => {
+    const needsInput = new WorkspaceStatus();
+    needsInput.hasRootAgent({
+      id: "root-agent",
+      status: "idle",
+      pendingPermissionCount: 1,
+      backgroundTaskCount: 1,
+    });
+    const failed = new WorkspaceStatus();
+    failed.hasRootAgent({ id: "root-agent", status: "error", backgroundTaskCount: 1 });
+
+    await expect(needsInput.workspaceStatus()).resolves.toBe("needs_input");
+    await expect(failed.workspaceStatus()).resolves.toBe("failed");
+  });
+
+  test("background tasks on a same-workspace subagent roll up to the parent's workspace", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasRootAgent({ id: "parent-agent", status: "idle" });
+    workspace.hasDelegatedAgent({ id: "child-agent", status: "idle", backgroundTaskCount: 2 });
+
+    await expect(workspace.workspaceStatus()).resolves.toBe("running");
   });
 
   test("running cross-workspace subagent contributes to its own workspace", async () => {

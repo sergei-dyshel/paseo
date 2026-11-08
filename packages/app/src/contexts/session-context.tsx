@@ -160,6 +160,7 @@ function buildAgentAttentionOsNotification(
     projectName: workspace?.projectCustomName ?? workspace?.projectDisplayName ?? null,
     permissionRequest:
       event.reason === "permission" ? getLatestPermissionRequest(session, event.agentId) : null,
+    backgroundTaskCount: agent?.backgroundTaskCount,
   });
   return {
     ...text,
