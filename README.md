@@ -48,6 +48,7 @@
 - Two-way title sync with Claude Code: `/rename` in Claude renames the Paseo tab, and renaming the tab (menu, `paseo agent update --name`, MCP `update_agent`) renames the Claude session.
 - Double-click an agent or terminal tab, or a sidebar workspace, to rename it.
 - "Use active tab name" workspace action in the workspace context and kebab menus.
+- A new workspace takes its first agent tab's name instead of a generated title, and a workspace and an agent tab that share a name are renamed together.
 - Desktop notifications name the project, workspace, and tab, and say what the agent wants ("Finished", "Permission: Bash", "Question: AskUserQuestion"); a newer notification replaces the same agent's older one.
 - Notifications fire only while no Paseo window is focused, and are cleared from Notification Center when a window regains focus.
 - Claude Code background tasks (shells, monitors, backgrounded subagents) keep the workspace spinner running after the agent goes idle, and the finished notification ends in "(have BG tasks)".

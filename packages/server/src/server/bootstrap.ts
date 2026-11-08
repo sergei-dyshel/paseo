@@ -227,14 +227,15 @@ import {
 import { deleteLocalCredential, writeLocalCredential } from "./local-credential.js";
 import { createWebUiMiddleware } from "./web-ui.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
+import { renameWorkspaceNamedAfterAgent } from "./workspace-title-sync.js";
 import { createGitMutationService } from "./session/git-mutation/git-mutation-service.js";
 import { workspaceIdsOnCheckout } from "./workspace-directory.js";
 import { configureGitProcessPolicy } from "../utils/run-git-command.js";
 import { resolveGitProcessPolicy } from "../utils/git-process-scheduler.js";
-import { resolveFirstAgentPromptTitle } from "./agent/create-agent-title.js";
 import {
   createAgentCommand,
   type CreateAgentCommandDependencies,
+  type EnsureWorkspaceForCreate,
 } from "./agent/create-agent/create.js";
 import { archiveAgentCommand, cancelAgentRunCommand } from "./agent/lifecycle-command.js";
 import { CreateAgentLifecycleDispatch } from "./agent/create-agent-lifecycle-dispatch.js";
@@ -1116,24 +1117,17 @@ export async function createPaseoDaemon(
   const findWorkspaceIdForCwdExternal = async (cwd: string): Promise<string | null> => {
     return resolveWorkspaceIdForPath(cwd, await workspaceRegistry.list());
   };
-  const ensureWorkspaceForCreateExternal = async (
-    cwd: string,
-    firstAgentContext?: FirstAgentContext,
-    context?: { callerWorkspaceId?: string },
-  ): Promise<string> => {
+  const ensureWorkspaceForCreateExternal: EnsureWorkspaceForCreate = async (
+    cwd,
+    title,
+    context,
+  ) => {
     const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
       cwd,
-      resolveFirstAgentPromptTitle(firstAgentContext),
+      title,
       undefined,
       context,
     );
-    if (firstAgentContext) {
-      workspaceAutoName.scheduleForDirectory({
-        workspaceId: workspace.workspaceId,
-        cwd: workspace.cwd,
-        firstAgentContext,
-      });
-    }
     return workspace.workspaceId;
   };
   const listActiveWorkspacesExternal = async (): Promise<ActiveWorkspaceRef[]> => {
@@ -1169,12 +1163,12 @@ export async function createPaseoDaemon(
       ),
     );
   };
-  const ensureWorkspaceForCreateAndBroadcastExternal = async (
-    cwd: string,
-    firstAgentContext?: FirstAgentContext,
-    context?: { callerWorkspaceId?: string },
-  ): Promise<string> => {
-    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, firstAgentContext, context);
+  const ensureWorkspaceForCreateAndBroadcastExternal: EnsureWorkspaceForCreate = async (
+    cwd,
+    title,
+    context,
+  ) => {
+    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, title, context);
     await emitWorkspaceUpdatesExternal([workspaceId]);
     return workspaceId;
   };
@@ -1196,9 +1190,6 @@ export async function createPaseoDaemon(
       logger,
     }),
     emitWorkspaceUpdateForCwd: emitWorkspaceUpdateForCwdExternal,
-    emitWorkspaceUpdateForWorkspaceId: async (workspaceId) => {
-      await emitWorkspaceUpdatesExternal([workspaceId]);
-    },
     logger,
   });
 
@@ -1385,26 +1376,24 @@ export async function createPaseoDaemon(
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
+    title: string;
   }) => {
     const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
       input.cwd,
-      resolveFirstAgentPromptTitle(input.firstAgentContext),
+      input.title,
     );
-    workspaceAutoName.scheduleForDirectory({
-      workspaceId: workspace.workspaceId,
-      cwd: workspace.cwd,
-      firstAgentContext: input.firstAgentContext,
-    });
     await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
     return workspace;
   };
   const createSchedulePaseoWorktreeExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
+    title: string;
   }) => {
     const result = await createPaseoWorktreeForTools({
       cwd: input.cwd,
       firstAgentContext: input.firstAgentContext,
+      ...(input.title ? { title: input.title } : {}),
     });
     await emitWorkspaceUpdatesExternal([result.workspace.workspaceId]);
     return result;
@@ -1462,6 +1451,19 @@ export async function createPaseoDaemon(
     } catch (error) {
       logger.warn({ err: error, agentId }, "Failed to complete schedules for archived agent");
     }
+  });
+  // Every agent rename (tab menu, CLI, MCP, a provider's own /rename) lands here, so the one
+  // workspace named after the agent follows it whichever way the rename came in.
+  agentManager.setAgentTitleChangedCallback((change) => {
+    void (async () => {
+      const workspace = await renameWorkspaceNamedAfterAgent({ workspaceRegistry }, change);
+      if (workspace) await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
+    })().catch((error) => {
+      logger.warn(
+        { err: error, agentId: change.agentId, workspaceId: change.workspaceId },
+        "Failed to rename the workspace named after an agent",
+      );
+    });
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");

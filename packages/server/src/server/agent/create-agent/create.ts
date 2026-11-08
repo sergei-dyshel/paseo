@@ -37,9 +37,10 @@ export interface CreateAgentCommandDependencies {
   ensureWorkspaceForCreate?: EnsureWorkspaceForCreate;
 }
 
+// Mints a fresh directory workspace for a cwd, titled after the agent it is created for.
 export type EnsureWorkspaceForCreate = (
   cwd: string,
-  firstAgentContext?: FirstAgentContext,
+  title?: string | null,
   context?: { callerWorkspaceId?: string },
 ) => Promise<string>;
 
@@ -277,11 +278,18 @@ async function resolveMcpCreateAgent(
     ? requireParentAgent(dependencies.agentManager, input.callerAgentId)
     : null;
   const cwd = resolveMcpInitialCwd(input, parentAgent);
+  const trimmedPrompt = input.initialPrompt?.trim() ?? "";
+  // The agent's tab title, which a workspace created for it starts with too.
+  const { provisionalTitle: title } = resolveCreateAgentTitles({
+    configTitle: input.config?.title ?? input.title,
+    initialPrompt: trimmedPrompt,
+  });
   const { resolvedCwd, createdWorkspaceId, createdWorktree } = await resolveMcpCwd({
     dependencies,
     cwd,
     worktree: input.worktree,
     initialPrompt: input.initialPrompt ?? "",
+    title,
     callerWorkspaceId: parentAgent?.workspaceId,
   });
   if (createdWorktree) input.onWorktreeCreated?.(createdWorktree);
@@ -299,7 +307,7 @@ async function resolveMcpCreateAgent(
         await ensureWorkspaceForMcpCreate(
           dependencies,
           resolvedCwd,
-          input.initialPrompt ?? "",
+          title,
           parentAgent?.workspaceId,
         ),
       ),
@@ -314,14 +322,13 @@ async function resolveMcpCreateAgent(
     parentAgent,
   });
 
-  const trimmedPrompt = input.initialPrompt?.trim() ?? "";
   return {
     config: buildMcpSessionConfig({
       input,
       resolvedProviderModel,
       provider,
       resolvedCwd: intent.cwd,
-      trimmedPrompt,
+      title,
       resolvedMode: resolvedCreateConfig.modeId,
       resolvedFeatures: resolvedCreateConfig.featureValues,
     }),
@@ -378,15 +385,11 @@ function buildMcpSessionConfig(params: {
   resolvedProviderModel: ResolvedProviderModel;
   provider: string;
   resolvedCwd: string;
-  trimmedPrompt: string;
+  title: string | null;
   resolvedMode?: string;
   resolvedFeatures?: Record<string, unknown>;
 }): AgentSessionConfig {
   const passthroughConfig = params.input.config;
-  const { provisionalTitle } = resolveCreateAgentTitles({
-    configTitle: passthroughConfig?.title ?? params.input.title,
-    initialPrompt: params.trimmedPrompt,
-  });
   const featureValues = params.resolvedFeatures ?? passthroughConfig?.featureValues;
   const config: AgentSessionConfig = {
     ...passthroughConfig,
@@ -397,8 +400,8 @@ function buildMcpSessionConfig(params: {
     thinkingOptionId: params.input.thinking ?? passthroughConfig?.thinkingOptionId,
     internal: params.input.internal ?? passthroughConfig?.internal,
   };
-  if (provisionalTitle) {
-    config.title = provisionalTitle;
+  if (params.title) {
+    config.title = params.title;
   }
   if (featureValues) {
     config.featureValues = featureValues;
@@ -409,17 +412,13 @@ function buildMcpSessionConfig(params: {
 async function ensureWorkspaceForMcpCreate(
   dependencies: CreateAgentCommandDependencies,
   cwd: string,
-  initialPrompt: string,
+  title: string | null,
   callerWorkspaceId?: string,
 ): Promise<string | undefined> {
   if (!dependencies.ensureWorkspaceForCreate) {
     return undefined;
   }
-  return dependencies.ensureWorkspaceForCreate(
-    cwd,
-    { prompt: initialPrompt },
-    { callerWorkspaceId },
-  );
+  return dependencies.ensureWorkspaceForCreate(cwd, title, { callerWorkspaceId });
 }
 
 async function sendInitialPrompt(
@@ -512,6 +511,7 @@ async function resolveMcpCwd(params: {
   dependencies: CreateAgentCommandDependencies;
   cwd: string;
   initialPrompt: string;
+  title: string | null;
   callerWorkspaceId?: string;
   worktree: CreateAgentFromMcpInput["worktree"];
 }): Promise<{
@@ -548,6 +548,7 @@ async function resolveMcpCwd(params: {
       refName: worktree.refName,
       action: worktree.action,
       githubPrNumber: worktree.githubPrNumber,
+      ...(params.title ? { title: params.title } : {}),
       firstAgentContext: { prompt: params.initialPrompt },
 
       paseoHome: dependencies.paseoHome,

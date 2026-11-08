@@ -247,6 +247,8 @@ type ScheduleAgentManager = Pick<
 interface ScheduleWorkspaceCreateInput {
   cwd: string;
   firstAgentContext: FirstAgentContext;
+  /** The run agent's title, which its workspace starts with too. */
+  title: string;
 }
 
 export interface ScheduleServiceOptions {
@@ -974,10 +976,11 @@ export class ScheduleService {
       throw new Error(`Schedule ${schedule.id} target changed during execution`);
     }
     await this.assertNewAgentCwdDirectory(config.cwd);
+    const title = resolveScheduleAgentTitle(config, schedule.prompt);
     let workspace: PersistedWorkspaceRecord | null = null;
     let agentId: string | null = null;
     try {
-      workspace = await this.createScheduleRunWorkspace(config, schedule.prompt);
+      workspace = await this.createScheduleRunWorkspace(config, schedule.prompt, title);
       await this.recordRunWorkspace({
         scheduleId: schedule.id,
         runId,
@@ -991,7 +994,7 @@ export class ScheduleService {
         config: buildScheduleAgentConfig(runConfig),
         cwd: workspace.cwd,
         workspaceId: workspace.workspaceId,
-        title: resolveScheduleAgentTitle(config, schedule.prompt),
+        title,
         labels: {
           "paseo.schedule-id": schedule.id,
           "paseo.schedule-run": runId,
@@ -1062,14 +1065,16 @@ export class ScheduleService {
   private async createScheduleRunWorkspace(
     config: Extract<ScheduleTarget, { type: "new-agent" }>["config"],
     prompt: string,
+    title: string,
   ): Promise<PersistedWorkspaceRecord> {
     const firstAgentContext = { prompt };
     switch (config.isolation ?? "local") {
       case "local":
-        return this.createDirectoryWorkspace({ cwd: config.cwd, firstAgentContext });
+        return this.createDirectoryWorkspace({ cwd: config.cwd, firstAgentContext, title });
       case "worktree":
-        return (await this.createPaseoWorktreeWorkspace({ cwd: config.cwd, firstAgentContext }))
-          .workspace;
+        return (
+          await this.createPaseoWorktreeWorkspace({ cwd: config.cwd, firstAgentContext, title })
+        ).workspace;
     }
   }
 

@@ -247,7 +247,6 @@ function createLogger() {
 function createWorkspaceAutoNameStub(): WorkspaceAutoName {
   return createStub<WorkspaceAutoName>({
     scheduleForWorktree: () => {},
-    scheduleForDirectory: () => {},
   });
 }
 

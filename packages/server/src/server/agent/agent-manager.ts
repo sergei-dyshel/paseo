@@ -293,6 +293,17 @@ export type AgentAttentionCallback = (params: {
 
 export type AgentArchivedCallback = (agentId: string) => Promise<void> | void;
 
+/**
+ * An agent's stored title was replaced, by the user, the CLI, an MCP tool, or the provider's own
+ * rename. The first title an agent gets is not a change.
+ */
+export type AgentTitleChangedCallback = (params: {
+  agentId: string;
+  workspaceId: string | undefined;
+  previousTitle: string | null;
+  title: string;
+}) => void;
+
 export interface ProviderAvailability {
   provider: AgentProvider;
   available: boolean;
@@ -796,6 +807,7 @@ export class AgentManager {
   private appendSystemPrompt: string;
   private onAgentAttention?: AgentAttentionCallback;
   private onAgentArchived?: AgentArchivedCallback;
+  private onAgentTitleChanged?: AgentTitleChangedCallback;
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   private logger: Logger;
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
@@ -891,6 +903,10 @@ export class AgentManager {
 
   setAgentArchivedCallback(callback: AgentArchivedCallback): void {
     this.onAgentArchived = callback;
+  }
+
+  setAgentTitleChangedCallback(callback: AgentTitleChangedCallback): void {
+    this.onAgentTitleChanged = callback;
   }
 
   setMcpBaseUrl(url: string | null): void {
@@ -2280,11 +2296,8 @@ export class AgentManager {
     if (!normalizedTitle) {
       return;
     }
-    if (
-      this.agentsAwaitingInitialSnapshotPersist.has(agent.id) &&
-      this.registry &&
-      (await this.registry.get(agent.id)) === null
-    ) {
+    const stored = (await this.registry?.get(agent.id)) ?? null;
+    if (this.agentsAwaitingInitialSnapshotPersist.has(agent.id) && this.registry && !stored) {
       return;
     }
     // The provider's handle records the title it last applied, so the same snapshot write
@@ -2295,6 +2308,15 @@ export class AgentManager {
     this.touchUpdatedAt(agent);
     await this.persistSnapshot(agent, { title: normalizedTitle });
     this.emitState(agent, { persist: false });
+    const previousTitle = stored?.title ?? null;
+    if (!agent.internal && previousTitle !== normalizedTitle) {
+      this.onAgentTitleChanged?.({
+        agentId: agent.id,
+        workspaceId: agent.workspaceId,
+        previousTitle,
+        title: normalizedTitle,
+      });
+    }
   }
 
   async setLabels(agentId: string, labels: Record<string, string>): Promise<void> {
@@ -2336,6 +2358,14 @@ export class AgentManager {
       updatedAt: this.nextStoredUpdatedAt(record),
     };
     await registry.upsert(nextRecord);
+    if (patch.title && patch.title !== record.title) {
+      this.onAgentTitleChanged?.({
+        agentId,
+        workspaceId: record.workspaceId,
+        previousTitle: record.title ?? null,
+        title: patch.title,
+      });
+    }
     return nextRecord;
   }
 

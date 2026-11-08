@@ -41,9 +41,8 @@ import {
   requireActiveWorkspaceForArchive,
   type ArchiveDependencies,
 } from "../../workspace-archive-service.js";
-import { createAgentCommand } from "../create-agent/create.js";
+import { createAgentCommand, type EnsureWorkspaceForCreate } from "../create-agent/create.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
-import type { FirstAgentContext } from "../../messages.js";
 import { everyMsToFiveFieldCron } from "@getpaseo/protocol/schedule/cadence";
 import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../../path-utils.js";
 import type { TerminalManager } from "../../../terminal/terminal-manager.js";
@@ -97,6 +96,7 @@ import type {
   WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import { resolveWorktreeSourceCwd } from "../../workspace-source.js";
+import { renameAgentsNamedAfterWorkspace } from "../../workspace-title-sync.js";
 import type { WorkspaceScriptsService } from "../../session/workspace-scripts/workspace-scripts-service.js";
 import {
   type ArchiveCommandDependencies,
@@ -149,12 +149,9 @@ export interface PaseoToolHostDependencies {
   markWorkspaceArchiving?: ArchiveDependencies["markWorkspaceArchiving"];
   clearWorkspaceArchiving?: ArchiveDependencies["clearWorkspaceArchiving"];
   createPaseoWorktree?: CreatePaseoWorktreeWorkflowFn;
-  // Mints a fresh directory workspace for a cwd and returns its id.
-  ensureWorkspaceForCreate?: (
-    cwd: string,
-    firstAgentContext?: FirstAgentContext,
-    context?: { callerWorkspaceId?: string },
-  ) => Promise<string>;
+  // Mints a fresh directory workspace for a cwd, titled after the agent it is created for,
+  // and returns its id.
+  ensureWorkspaceForCreate?: EnsureWorkspaceForCreate;
   browserToolsEnabled?: boolean;
   browserToolsBroker?: BrowserToolsBroker | null;
   paseoToolPolicy?: ProviderPaseoToolsPolicy;
@@ -1722,9 +1719,10 @@ function createToolCatalog(
         // COMPAT(nestedCreateAgentPlacement): accept the old relationship/workspace shape without
         // advertising it to models. Added in v0.2.0; remove after 2027-01-17.
         const parsed = parseToolArguments(legacyAgentToAgentCreateAgentArgsSchema, args);
-        const { cwd, workspaceId } = await resolveCreateAgentWorkspace(parsed.workspace, {
-          prompt: parsed.initialPrompt,
-        });
+        const { cwd, workspaceId } = await resolveCreateAgentWorkspace(
+          parsed.workspace,
+          parsed.title,
+        );
         return {
           kind: "agent-scoped",
           parsedArgs: parsed,
@@ -1734,9 +1732,10 @@ function createToolCatalog(
         };
       }
       const parsed = parseToolArguments(agentToAgentCreateAgentArgsSchema, args);
-      const { cwd, workspaceId } = await resolveCanonicalCreateAgentWorkspace(parsed.workspaceId, {
-        prompt: parsed.initialPrompt,
-      });
+      const { cwd, workspaceId } = await resolveCanonicalCreateAgentWorkspace(
+        parsed.workspaceId,
+        parsed.title,
+      );
       return {
         kind: "agent-scoped",
         parsedArgs: parsed,
@@ -1758,9 +1757,10 @@ function createToolCatalog(
       if (!parsedArgs.workspace) {
         throw new PaseoToolInputError("Legacy create_agent placement could not be resolved");
       }
-      const { cwd, workspaceId } = await resolveCreateAgentWorkspace(parsedArgs.workspace, {
-        prompt: parsedArgs.initialPrompt,
-      });
+      const { cwd, workspaceId } = await resolveCreateAgentWorkspace(
+        parsedArgs.workspace,
+        parsedArgs.title,
+      );
       return {
         kind: "top-level",
         parsedArgs,
@@ -1772,7 +1772,7 @@ function createToolCatalog(
     const parsedArgs = parseToolArguments(canonicalTopLevelCreateAgentArgsSchema, args);
     const { cwd, workspaceId } = await resolveCanonicalCreateAgentWorkspace(
       parsedArgs.workspaceId,
-      { prompt: parsedArgs.initialPrompt },
+      parsedArgs.title,
     );
     return {
       kind: "top-level",
@@ -1801,17 +1801,14 @@ function createToolCatalog(
   }
 
   async function resolveCanonicalCreateAgentWorkspace(
-    workspaceId?: string,
-    firstAgentContext?: FirstAgentContext,
+    workspaceId: string | undefined,
+    title: string,
   ): Promise<{
     cwd: string | undefined;
     workspaceId: string;
   }> {
     if (workspaceId) {
-      const resolved = await resolveCreateAgentWorkspace(
-        { kind: "existing", workspaceId },
-        undefined,
-      );
+      const resolved = await resolveCreateAgentWorkspace({ kind: "existing", workspaceId }, title);
       return { cwd: resolved.cwd, workspaceId };
     }
     if (!callerAgentId) {
@@ -1821,7 +1818,7 @@ function createToolCatalog(
       const cwd = process.cwd();
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext, {
+        workspaceId: await options.ensureWorkspaceForCreate(cwd, title, {
           callerWorkspaceId: resolveCallerAgent()?.workspaceId,
         }),
       };
@@ -1872,11 +1869,12 @@ function createToolCatalog(
     });
   }
 
+  /** `title` is the created agent's; a workspace created for it starts with the same one. */
   async function resolveCreateAgentWorkspace(
     workspace:
       | LegacyAgentToAgentCreateAgentArgs["workspace"]
       | NonNullable<LegacyTopLevelCreateAgentArgs["workspace"]>,
-    firstAgentContext: FirstAgentContext | undefined,
+    title: string,
   ): Promise<{
     cwd: string | undefined;
     workspaceId: string | undefined;
@@ -1927,7 +1925,7 @@ function createToolCatalog(
       }
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext, {
+        workspaceId: await options.ensureWorkspaceForCreate(cwd, title, {
           callerWorkspaceId: resolveCallerAgent()?.workspaceId,
         }),
       };
@@ -2352,6 +2350,10 @@ function createToolCatalog(
         updatedAt: new Date().toISOString(),
       });
       await options.emitWorkspaceUpdatesForWorkspaceIds([workspaceId]);
+      await renameAgentsNamedAfterWorkspace(
+        { agentStorage, agentManager, logger: childLogger },
+        { workspaceId, previousTitle: existing.title, title },
+      );
 
       return {
         content: [],

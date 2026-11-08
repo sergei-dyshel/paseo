@@ -62,6 +62,8 @@ export class CreateAgentLifecycleDispatch {
     cwd: string;
     target: CreateAgentWorktreeTarget | undefined;
     firstAgentContext: FirstAgentContext;
+    /** The agent's initial title, which the new worktree workspace starts with too. */
+    title?: string | null;
     background?: boolean;
     callerWorkspaceId?: string;
   }): Promise<CreatePaseoWorktreeWorkflowResult | null> {
@@ -86,6 +88,7 @@ export class CreateAgentLifecycleDispatch {
     return this.dependencies.createPaseoWorktreeWorkflow(
       {
         ...placement,
+        ...(input.title ? { title: input.title } : {}),
         background: input.background,
         callerWorkspaceId: input.callerWorkspaceId,
         firstAgentContext: input.firstAgentContext,

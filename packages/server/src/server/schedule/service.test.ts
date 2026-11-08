@@ -126,7 +126,7 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
       cwd: input.cwd,
       kind: "directory",
       displayName: "test-project",
-      title: input.firstAgentContext.prompt,
+      title: input.title || null,
       branch: null,
       baseBranch: null,
       createdAt: timestamp,
@@ -240,10 +240,7 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
   return {
     workspaceRegistry,
     createDirectoryWorkspace: async (input) => {
-      return workspaceProvisioning.createWorkspaceForDirectory(
-        input.cwd,
-        input.firstAgentContext.prompt,
-      );
+      return workspaceProvisioning.createWorkspaceForDirectory(input.cwd, input.title);
     },
     createArchiveWorkspace:
       ({ agentManager, agentStorage, logger = createTestLogger() }) =>
@@ -793,6 +790,52 @@ describe("ScheduleService", () => {
     expect(agentId).toMatch(/^[0-9a-f-]{36}$/);
     const storedAgent = await agentStorage.get(agentId!);
     expect(storedAgent?.title).toBe("Audit flaky checkout flow");
+  });
+
+  test("names a run's new workspace after the run's agent", async () => {
+    const { workspaceRegistry, createDirectoryWorkspace: createScheduleDirectoryWorkspace } =
+      await createRegistryBackedScheduleWorkspaceDeps(tempDir);
+    const manager = new AgentManager({
+      logger: createTestLogger(),
+      clients: createTestAgentClients(),
+      registry: agentStorage,
+    });
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: manager,
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      createDirectoryWorkspace: createScheduleDirectoryWorkspace,
+      now: () => now,
+    });
+
+    const created = await service.create({
+      prompt: "Audit flaky checkout flow\n\nReport only blockers.",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "new-agent",
+        config: {
+          provider: "claude",
+          model: "test-model",
+          cwd: tempDir,
+          title: "Nightly checkout audit",
+          archiveOnFinish: false,
+          isolation: "local",
+        },
+      },
+      maxRuns: 1,
+    });
+
+    await service.tick();
+
+    const agentId = (await service.inspect(created.id)).runs[0]?.agentId;
+    expect(agentId).toMatch(/^[0-9a-f-]{36}$/);
+    const storedAgent = await agentStorage.get(agentId!);
+    expect(storedAgent?.title).toBe("Nightly checkout audit");
+    expect((await workspaceRegistry.get(storedAgent!.workspaceId!))?.title).toBe(
+      "Nightly checkout audit",
+    );
   });
 
   test("new-agent schedule records create no workspace until run time", async () => {

@@ -251,6 +251,7 @@ import {
   type CreatePaseoWorktreeResult,
 } from "./paseo-worktree-service.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
+import { renameAgentsNamedAfterWorkspace } from "./workspace-title-sync.js";
 import {
   createPaseoWorktreeWorkflow as createWorktreeWorkflow,
   type CreatePaseoWorktreeWorkflowResult,
@@ -383,7 +384,6 @@ type CreateAgentRequestMessage = Extract<SessionInboundMessage, { type: "create_
 interface ResolvedSessionCreateAgentIntent {
   config: AgentSessionConfig;
   intent: CreateAgentIntent;
-  createdDirectoryWorkspace: boolean;
 }
 
 type FetchWorkspacesRequestMessage = Extract<
@@ -3883,11 +3883,11 @@ export class Session {
       const trimmed = title?.trim() ?? "";
       const nextTitle = trimmed.length === 0 ? null : trimmed;
       const updatedAt = new Date().toISOString();
-      const updated = await this.workspaceRegistry.update(workspaceId, (existing) => ({
-        ...existing,
-        title: nextTitle,
-        updatedAt,
-      }));
+      let previousTitle: string | null | undefined;
+      const updated = await this.workspaceRegistry.update(workspaceId, (existing) => {
+        previousTitle = existing.title;
+        return { ...existing, title: nextTitle, updatedAt };
+      });
       if (!updated) {
         this.emit({
           type: "workspace.title.set.response",
@@ -3914,6 +3914,14 @@ export class Session {
       });
 
       await this.emitWorkspaceUpdatesForWorkspaceIds([workspaceId]);
+      await renameAgentsNamedAfterWorkspace(
+        {
+          agentStorage: this.agentStorage,
+          agentManager: this.agentManager,
+          logger: this.sessionLogger,
+        },
+        { workspaceId, previousTitle: previousTitle ?? null, title: nextTitle },
+      );
     } catch (error) {
       this.sessionLogger.error(
         { err: error, workspaceId, requestId },
@@ -4248,6 +4256,9 @@ export class Session {
         throw new Error("Session is not authorized to create an agent");
       }
       const agentInput = request.agent;
+      // Unless the request names the workspace, it starts with its first agent's title: an
+      // explicit one here, otherwise the prompt's first line, which the workspace derives too.
+      const agentTitle = request.title?.trim() ? undefined : agentInput?.config.title?.trim();
       const creation = await this.creationService.create(
         {
           kind: "workspace",
@@ -4262,6 +4273,7 @@ export class Session {
             const descriptor = await this.createRequestedWorkspace(
               {
                 ...request,
+                ...(agentTitle ? { title: agentTitle } : {}),
                 firstAgentContext: agentInput
                   ? { prompt: agentInput.initialPrompt, attachments: agentInput.attachments }
                   : request.firstAgentContext,
@@ -4454,6 +4466,7 @@ export class Session {
       }
       this.validatePublicAgentWorkspaceIntent(msg);
       const trimmedPrompt = initialPrompt?.trim();
+      // The agent's tab title, which a workspace created for it starts with too.
       const { provisionalTitle } = resolveCreateAgentTitles({
         configTitle: config.title,
         initialPrompt: trimmedPrompt,
@@ -4463,11 +4476,11 @@ export class Session {
         ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
       };
-      const workspacePromptTitle = resolveFirstAgentPromptTitle(firstAgentContext);
       const createdWorktree = await this.createAgentLifecycleDispatch.createWorktreeForRequest({
         cwd: config.cwd,
         target: worktree,
         firstAgentContext,
+        title: provisionalTitle,
         background: msg.background,
         callerWorkspaceId: this.getCallerWorkspaceId(msg.callerAgentId),
       });
@@ -4475,7 +4488,7 @@ export class Session {
       const resolvedIntent = await this.resolveSessionCreateAgentIntent({
         request: msg,
         createdWorktree,
-        workspacePromptTitle,
+        workspaceTitle: provisionalTitle,
       });
       const resolvedCwd = resolve(resolvedIntent.config.cwd);
       if (!(await this.filesystem.isDirectory(resolvedCwd))) {
@@ -4519,16 +4532,6 @@ export class Session {
       await this.agentUpdates.forwardLiveAgent(
         this.agentManager.getAgent(snapshot.id) ?? liveSnapshot,
       );
-      if (resolvedIntent.createdDirectoryWorkspace && trimmedPrompt) {
-        this.workspaceAutoName.scheduleForDirectory(
-          {
-            workspaceId: resolvedIntent.intent.workspaceId,
-            cwd: resolvedIntent.config.cwd,
-            firstAgentContext,
-          },
-          { currentSelection: this.getFocusedAgentSelectionForCwd(resolvedIntent.config.cwd) },
-        );
-      }
       this.createAgentLifecycleDispatch.registerAutoArchiveIfRequested({
         autoArchive,
         agentId: snapshot.id,
@@ -4551,7 +4554,7 @@ export class Session {
   private async resolveSessionCreateAgentIntent(input: {
     request: CreateAgentRequestMessage;
     createdWorktree: CreatePaseoWorktreeWorkflowResult | null;
-    workspacePromptTitle: string | null;
+    workspaceTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
     const callerAgent = request.callerAgentId
@@ -4583,7 +4586,7 @@ export class Session {
         workspaceId: await this.workspaceProvisioning.resolveOrCreateWorkspaceIdForCreateAgent({
           createdWorktree: null,
           cwd: config.cwd,
-          initialTitle: input.workspacePromptTitle,
+          initialTitle: input.workspaceTitle,
           background: request.background,
           callerWorkspaceId: callerAgent?.workspaceId,
         }),
@@ -4592,11 +4595,7 @@ export class Session {
     });
     config = { ...config, cwd: intent.cwd };
 
-    return {
-      config,
-      intent,
-      createdDirectoryWorkspace: !createdWorktree && !request.workspaceId && !callerAgent,
-    };
+    return { config, intent };
   }
 
   private async handleResumeAgentRequest(
@@ -6918,17 +6917,6 @@ export class Session {
           "Background snapshot refresh failed after workspace.create",
         );
       });
-    if (request.firstAgentContext) {
-      const firstAgentContext = request.firstAgentContext;
-      this.workspaceAutoName.scheduleForDirectory(
-        {
-          workspaceId: workspace.workspaceId,
-          cwd: workspace.cwd,
-          firstAgentContext,
-        },
-        { currentSelection: this.getFocusedAgentSelectionForCwd(workspace.cwd) },
-      );
-    }
     return descriptor;
   }
 

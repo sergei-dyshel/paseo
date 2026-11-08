@@ -17,6 +17,7 @@ import {
   AgentManagerShuttingDownError,
   commandMayHaveChangedExternalState,
   type AgentManagerEvent,
+  type AgentTitleChangedCallback,
   type ManagedAgent,
 } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
@@ -5665,6 +5666,69 @@ test("an explicit rename reaches the provider session before it is stored", asyn
     expect(order).toEqual(["stored:From provider"]);
   } finally {
     snapshotSpy.mockRestore();
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("every title change, from Paseo or the provider, live or stored, reports the title it replaced", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-changed-callback-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let capturedSession: TestAgentSession | null = null;
+  class TitleEventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new TestAgentSession(config);
+      return capturedSession;
+    }
+  }
+  const changes: Parameters<AgentTitleChangedCallback>[0][] = [];
+  const manager = new AgentManager({
+    clients: { codex: new TitleEventClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000138",
+  });
+  manager.setAgentTitleChangedCallback((change) => changes.push(change));
+  try {
+    // The first title is not a rename.
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "wks_titles",
+      initialTitle: "Fix login",
+    });
+    await manager.updateAgentMetadata(snapshot.id, { title: "Login retries" });
+    // Setting the same title again changes nothing.
+    await manager.updateAgentMetadata(snapshot.id, { title: "Login retries" });
+    capturedSession?.pushEvent({
+      type: "title_changed",
+      provider: "codex",
+      title: "From provider",
+    });
+    await manager.flush();
+    await manager.closeAgent(snapshot.id);
+    await manager.updateAgentMetadata(snapshot.id, { title: "Stored rename" });
+
+    expect(changes).toEqual([
+      {
+        agentId: snapshot.id,
+        workspaceId: "wks_titles",
+        previousTitle: "Fix login",
+        title: "Login retries",
+      },
+      {
+        agentId: snapshot.id,
+        workspaceId: "wks_titles",
+        previousTitle: "Login retries",
+        title: "From provider",
+      },
+      {
+        agentId: snapshot.id,
+        workspaceId: "wks_titles",
+        previousTitle: "From provider",
+        title: "Stored rename",
+      },
+    ]);
+  } finally {
     for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
     await manager.flush();
     rmSync(workdir, { recursive: true, force: true });

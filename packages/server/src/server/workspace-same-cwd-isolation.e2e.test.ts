@@ -324,7 +324,7 @@ test("daemon bootstrap migrates cwd-only legacy agents before same-cwd workspace
   }
 });
 
-test("workspace.create directory source with firstAgentContext generates a daemon-visible workspace title", async () => {
+test("workspace.create directory source with firstAgentContext titles the workspace with the first prompt line", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-named-local-dir-"));
   const daemon = await createTestPaseoDaemon({
     agentClients: { mock: new MockLoadTestAgentClient() },
@@ -362,7 +362,7 @@ test("workspace.create directory source with firstAgentContext generates a daemo
   }
 }, 20_000);
 
-test("local workspace auto-title does not broadcast provider snapshot warm-up to clients", async () => {
+test("creating a titled local workspace does not broadcast provider snapshot warm-up to clients", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-title-snapshot-storm-"));
   const stormClients = createSnapshotStormClients();
   const daemon = await createSnapshotStormDaemon(stormClients);

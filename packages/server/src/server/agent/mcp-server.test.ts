@@ -210,16 +210,6 @@ function expectSingleTextContent(response: { content?: LooseContentBlock[] }): s
   return z.string().min(1).parse(block?.text);
 }
 
-async function waitForWorkspaceTitle(
-  workspaceRecords: Map<string, PersistedWorkspaceRecord>,
-  workspaceId: string,
-  title: string,
-): Promise<void> {
-  await vi.waitFor(() => expect(workspaceRecords.get(workspaceId)?.title).toBe(title), {
-    timeout: 5_000,
-  });
-}
-
 async function removeTempDir(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
@@ -813,9 +803,6 @@ function createPaseoWorktreeForMcpTest(options: {
     emitWorkspaceUpdateForCwd: async (cwd) => {
       const workspace = Array.from(workspaces.values()).find((record) => record.cwd === cwd);
       options.broadcasts.push(z.string().parse(workspace?.workspaceId));
-    },
-    emitWorkspaceUpdateForWorkspaceId: async (workspaceId) => {
-      options.broadcasts.push(workspaceId);
     },
     logger: createTestLogger(),
     generateWorkspaceName: options.generateWorkspaceName ?? (async () => null),
@@ -1640,11 +1627,9 @@ describe("create_agent MCP tool", () => {
       initialPrompt: "Do work",
     });
 
-    expect(ensureWorkspace).toHaveBeenCalledWith(
-      existingCwd,
-      { prompt: "Do work" },
-      { callerWorkspaceId: undefined },
-    );
+    expect(ensureWorkspace).toHaveBeenCalledWith(existingCwd, "Top-level agent", {
+      callerWorkspaceId: undefined,
+    });
     expect(spies.agentManager.createAgent).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: existingCwd }),
       undefined,
@@ -2117,111 +2102,48 @@ describe("create_agent MCP tool", () => {
     );
   });
 
-  it("auto-titles an agent-created directory workspace from the initial prompt", async () => {
+  it("names an agent-created directory workspace after the agent, not its prompt", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const tempDir = await mkdtemp(join(tmpdir(), "paseo-mcp-agent-directory-auto-title-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "paseo-mcp-agent-directory-title-"));
     const workspaceDir = join(tempDir, "workspace");
-    const workspaceRecords = new Map<string, PersistedWorkspaceRecord>();
-    const broadcasts: string[] = [];
-    const workspaceGitService = new WorkspaceGitServiceImpl({
-      logger: createTestLogger(),
-      paseoHome: join(tempDir, ".paseo"),
-      deps: { github: createGitHubServiceStub() },
-    });
-    const workspaceAutoName = new WorkspaceAutoName({
-      agentManager,
-      workspaceRegistry: {
-        update: async (workspaceId, updater) => {
-          const current = workspaceRecords.get(workspaceId);
-          if (!current) return null;
-          const updated = updater(current);
-          workspaceRecords.set(workspaceId, updated);
-          return updated;
-        },
-      },
-      workspaceGitService,
-      providerSnapshotManager: createOpenCodeManager().manager,
-      readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
-      gitMutation: createGitMutationService({
-        workspaceGitService,
-        github: createGitHubServiceStub(),
-        logger: createTestLogger(),
-      }),
-      emitWorkspaceUpdateForCwd: async () => {},
-      emitWorkspaceUpdateForWorkspaceId: async (workspaceId) => {
-        broadcasts.push(workspaceId);
-      },
-      logger: createTestLogger(),
-      generateWorkspaceName: async () => ({
-        title: "Directory Workspace Title",
-        branch: "directory-workspace-title",
-      }),
-    });
 
     try {
       await mkdir(workspaceDir, { recursive: true });
       spies.agentManager.createAgent.mockImplementation(async (config: { cwd: string }) => ({
-        id: "agent-directory-auto-title",
+        id: "agent-directory-title",
         cwd: config.cwd,
         lifecycle: "idle",
         currentModeId: null,
         availableModes: [],
         config: { title: "Directory agent" },
       }));
+      const ensureWorkspace = vi.fn(async () => "workspace-directory-title");
 
       const server = await createAgentMcpServer({
         agentManager,
         agentStorage,
         providerSnapshotManager: createOpenCodeManager().manager,
-        ensureWorkspaceForCreate: async (cwd, firstAgentContext) => {
-          const workspace = createPersistedWorkspaceRecord({
-            workspaceId: "workspace-directory-auto-title",
-            projectId: "project-directory-auto-title",
-            cwd,
-            kind: "directory",
-            displayName: "workspace",
-            title: firstAgentContext?.prompt ?? null,
-            createdAt: "2026-07-03T00:00:00.000Z",
-            updatedAt: "2026-07-03T00:00:00.000Z",
-          });
-          workspaceRecords.set(workspace.workspaceId, workspace);
-          if (firstAgentContext) {
-            workspaceAutoName.scheduleForDirectory({
-              workspaceId: workspace.workspaceId,
-              cwd: workspace.cwd,
-              firstAgentContext,
-            });
-          }
-          return workspace.workspaceId;
-        },
+        ensureWorkspaceForCreate: ensureWorkspace,
         logger,
       });
-      const tool = registeredTool(server, "create_agent");
-      await tool.handler({
+      await registeredTool(server, "create_agent").handler({
         ...detachedDirectoryWorkspace(workspaceDir),
         title: "Directory agent",
         provider: "codex/gpt-5.4",
         initialPrompt: "Name a directory workspace from the prompt",
       });
-      await waitForWorkspaceTitle(
-        workspaceRecords,
-        "workspace-directory-auto-title",
-        "Directory Workspace Title",
-      );
 
+      expect(ensureWorkspace).toHaveBeenCalledWith(workspaceDir, "Directory agent", {
+        callerWorkspaceId: undefined,
+      });
       expect(spies.agentManager.createAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: workspaceDir,
           title: "Directory agent",
         }),
         undefined,
-        { workspaceId: "workspace-directory-auto-title" },
+        { workspaceId: "workspace-directory-title" },
       );
-      expect(workspaceRecords.get("workspace-directory-auto-title")).toMatchObject({
-        title: "Directory Workspace Title",
-        branch: null,
-      });
-      expect(broadcasts).toEqual(["workspace-directory-auto-title"]);
     } finally {
       await removeTempDir(tempDir);
     }
@@ -4903,6 +4825,68 @@ describe("rename_workspace MCP tool", () => {
       title: "Payments flow",
     });
     expect(emittedWorkspaceIds).toEqual([["wks_other"]]);
+  });
+
+  it("renames the agents named after the workspace along with it", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "wks_parent",
+      projectId: "proj_parent",
+      cwd: REPO_CWD,
+      kind: "local_checkout",
+      displayName: "main",
+      title: "Fix login",
+      createdAt: "2026-07-03T09:00:00.000Z",
+      updatedAt: "2026-07-03T09:00:00.000Z",
+    });
+    const workspaces = new Map([[workspace.workspaceId, workspace]]);
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({
+        id: "parent-agent",
+        cwd: REPO_CWD,
+        workspaceId: workspace.workspaceId,
+      }),
+    );
+    spies.agentStorage.listByWorkspace = vi.fn(async (workspaceId: string) =>
+      workspaceId === "wks_parent"
+        ? [
+            createStoredRecord({
+              id: "named-agent",
+              workspaceId: "wks_parent",
+              title: "Fix login",
+              archivedAt: null,
+            }),
+            createStoredRecord({
+              id: "other-agent",
+              workspaceId: "wks_parent",
+              title: "Payments",
+              archivedAt: null,
+            }),
+          ]
+        : [],
+    );
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      workspaceRegistry: {
+        get: async (workspaceId) => workspaces.get(workspaceId) ?? null,
+        upsert: async (record) => {
+          workspaces.set(record.workspaceId, record);
+        },
+      },
+      emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+      callerAgentId: "parent-agent",
+      logger,
+    });
+    const tool = registeredTool(server, "rename_workspace");
+
+    await invokeToolWithParsedInput(tool, { title: "Login retries" });
+
+    expect(workspaces.get("wks_parent")?.title).toBe("Login retries");
+    expect(spies.agentManager.updateAgentMetadata.mock.calls).toEqual([
+      ["named-agent", { title: "Login retries" }],
+    ]);
   });
 
   it("rejects archived workspaces", async () => {
