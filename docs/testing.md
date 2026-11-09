@@ -170,6 +170,8 @@ Vitest picks up tests by suffix. The suffix tells the runner which category it b
 
 `*.browser.test.ts` files need Playwright's Chromium (`npx playwright install chromium`); without it the run reports an unhandled `browserType.launch` error for that file while the rest of a glob passes.
 
+A `*.browser.test.ts` file cannot import anything that reaches `packages/app/src/components/toast-host.tsx`. The file fails to load with `does not provide an export named 'ToastAndroid'`, because react-native-web has no `ToastAndroid`. `@/hooks/use-settings` reaches the toast host through the desktop settings, so a component that calls `useAppSettings()` cannot mount in one. Put the part under test in its own module and mount that, as `sidebar-workspace-title-text.browser.test.tsx` does.
+
 Browser Playwright specs live in `packages/app/e2e/browser/`. Desktop Playwright and real-Electron E2E live in `packages/desktop/e2e/`. Harness code shared by both suites lives in `packages/app/e2e/support/`; neither suite may place specs there. App Playwright specs that hit real providers use `*.real.spec.ts` and run through `npm run test:e2e:real --workspace=@getpaseo/app`; the default browser project ignores that suffix so CI does not need provider credentials.
 
 Live provider smoke tests belong in `*.real.e2e.test.ts`, not `*.test.ts`, even when guarded by environment variables. Default unit suites must use deterministic provider adapters/fakes so missing credits, auth outages, and upstream model drift do not block normal CI.

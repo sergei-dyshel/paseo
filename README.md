@@ -53,6 +53,7 @@
 - Notifications fire only while no Paseo window is focused, and are cleared from Notification Center when a window regains focus.
 - Claude Code background tasks (shells, monitors, backgrounded subagents) keep the workspace spinner running after the agent goes idle, and the finished notification ends in "(have BG tasks)".
 - Resuming or importing a Claude session picks up the permission mode, and the model and effort of the last turn, that a terminal `claude --resume` ran with, instead of pinning Paseo's own.
+- Sidebar workspace titles take their status dot's color: yellow for "Needs input", red for "Failed", green for "Ready to review", and blue for "Working".
 
 ### Development
 

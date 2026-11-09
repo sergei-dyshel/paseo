@@ -173,9 +173,10 @@ function statusTints(colors: typeof lightStatusColors, alphaHex: string) {
 const lightStatusTints = statusTints(lightStatusColors, "1f"); // 12%
 const darkStatusTints = statusTints(darkStatusColors, "29"); // 16%
 
-// Status *dot* colors — the small filled discs on a sidebar row, and the glyphs that stand in
-// for them. Same four hues and the same generation rule as the status colors above, but its
-// own band, because a dot is doing a different job than a check icon or a host badge.
+// Status *dot* colors — the small filled discs on a sidebar row, the glyphs that stand in for
+// them, and the title of a sidebar workspace row that has a status. Same four hues and the same
+// generation rule as the status colors above, but its own band, because a dot is doing a
+// different job than a check icon or a host badge.
 //
 // A dot is 6pt of solid color with no shape to read and no label attached. At the status
 // band's lightness the dots read dimmer than the static text and icons beside them on the same

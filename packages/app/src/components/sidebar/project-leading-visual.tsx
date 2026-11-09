@@ -3,6 +3,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, CircleAlert } from "lucide-react-native";
 import { ProjectIconView } from "@/components/project-icon-view";
+import { SIDEBAR_WORKSPACE_TITLE_LINE_HEIGHT } from "@/components/sidebar/sidebar-workspace-title-text";
 import { getStatusBucketLabel } from "@/hooks/sidebar-status-view-model";
 import { densityIconBox, densityIconProps } from "@/styles/density";
 import type { Theme } from "@/styles/theme";
@@ -24,9 +25,9 @@ import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 
 // Every surfaced status shares one badge shell, so the badge never changes size or position
 // between states. Only the thing inside it changes.
-// Matches the workspace title's lineHeight (sidebar-workspace-row-content's
-// workspaceBranchText) so the icon centers on the title rather than floating above it.
-const LEADING_SLOT_HEIGHT = 20;
+// Matches the workspace title's line height so the icon centers on the title rather than
+// floating above it.
+const LEADING_SLOT_HEIGHT = SIDEBAR_WORKSPACE_TITLE_LINE_HEIGHT;
 const STATUS_BADGE_SIZE = 12;
 // How far the badge overhangs the icon's bottom-right corner. Well short of half the badge:
 // centered on the corner it reads as hanging off the icon rather than sitting on it, and the

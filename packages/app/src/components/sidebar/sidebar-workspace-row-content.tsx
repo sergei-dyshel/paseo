@@ -28,6 +28,10 @@ import {
 import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { StatusRing } from "@/components/status-ring";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
+import {
+  SIDEBAR_WORKSPACE_TITLE_LINE_HEIGHT,
+  SidebarWorkspaceTitleText,
+} from "@/components/sidebar/sidebar-workspace-title-text";
 import { DensityIcon } from "@/components/ui/density-icon";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
@@ -124,14 +128,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   // The workspace carries label names; their colors live in its host's catalog, so the row is
   // where the two meet — the meta line is handed finished definitions.
   const labels = useWorkspaceLabelDefinitions(workspace.serverId, workspace.labels);
-  const workspaceBranchTextStyle = useMemo(
-    () => [
-      styles.workspaceBranchText,
-      isHovered && styles.workspaceBranchTextHovered,
-      isCreating && styles.workspaceBranchTextCreating,
-    ],
-    [isHovered, isCreating],
-  );
 
   return (
     <View style={styles.workspaceRowContent}>
@@ -156,9 +152,12 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         )}
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
-            <Text style={workspaceBranchTextStyle} numberOfLines={1}>
-              {workspaceLabel}
-            </Text>
+            <SidebarWorkspaceTitleText
+              label={workspaceLabel}
+              statusBucket={workspace.statusBucket}
+              isHovered={isHovered}
+              isCreating={isCreating}
+            />
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
@@ -453,9 +452,6 @@ export function SidebarWorkspaceTrailingActionOverlay({
   );
 }
 
-// The status dot centres on the title's first line, so both share its line height.
-const TITLE_LINE_HEIGHT = 20;
-
 const styles = StyleSheet.create((theme) => ({
   workspaceRowContent: {
     position: "relative",
@@ -484,7 +480,8 @@ const styles = StyleSheet.create((theme) => ({
   workspaceStatusDot: {
     position: "relative",
     width: densityIconBox("md"),
-    height: TITLE_LINE_HEIGHT,
+    // Centers the dot on the title's first line.
+    height: SIDEBAR_WORKSPACE_TITLE_LINE_HEIGHT,
     borderRadius: theme.borderRadius.full,
     flexShrink: 0,
     alignItems: "center",
@@ -511,23 +508,6 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.foregroundExtraMuted,
     opacity: 0.3,
-  },
-  // The title owns the first line outright now that the host, change request and CI moved
-  // to the meta row, so it takes the full width the trailing slot leaves behind.
-  workspaceBranchText: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
-    fontWeight: "400",
-    lineHeight: TITLE_LINE_HEIGHT,
-    opacity: 0.76,
-    flex: 1,
-    minWidth: 0,
-  },
-  workspaceBranchTextCreating: {
-    opacity: 0.92,
-  },
-  workspaceBranchTextHovered: {
-    opacity: 1,
   },
   statusDotNeedsInput: {
     backgroundColor: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
