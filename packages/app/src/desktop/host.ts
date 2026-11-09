@@ -64,6 +64,8 @@ export interface DesktopNotificationBridge {
           body?: string;
           groupId?: string;
           id?: string;
+          /** PNG data URL, because Electron's `nativeImage` decodes only PNG and JPEG. */
+          icon?: string;
           data?: Record<string, unknown>;
         },
   ) => Promise<boolean>;

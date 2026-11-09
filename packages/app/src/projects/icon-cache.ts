@@ -1,7 +1,8 @@
+import type { QueryClient } from "@tanstack/react-query";
 import type { ProjectIcon } from "@getpaseo/protocol/messages";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { projectIconCacheStorage } from "./icon-cache-storage";
-import type { ProjectIconTarget } from "./icon-target";
+import type { ProjectIconPlacement } from "./icon-target";
 
 const STORAGE_KEY = "@paseo:project-icon-cache";
 const CACHE_VERSION = 1;
@@ -119,7 +120,7 @@ export class ProjectIconCache {
   }
 
   query(
-    target: ProjectIconTarget,
+    target: ProjectIconPlacement,
     supportsCustomIcons: boolean | null,
     getClient: () => DaemonClient | null,
     connected: boolean,
@@ -164,6 +165,28 @@ export class ProjectIconCache {
     };
   }
 
+  /**
+   * Load the icon for code outside React through the same query the sidebar runs.
+   *
+   * It returns whatever that query or an earlier session cached, and fetches once when
+   * nothing has. While the query is disabled (host disconnected or not yet identified) it
+   * only reads the cache, because running the query then would store an empty answer as
+   * the icon or wait on a dead connection.
+   */
+  async load(
+    queryClient: QueryClient,
+    target: ProjectIconPlacement,
+    supportsCustomIcons: boolean | null,
+    getClient: () => DaemonClient | null,
+    connected: boolean,
+  ): Promise<ProjectIcon | null> {
+    const options = this.query(target, supportsCustomIcons, getClient, connected);
+    if (!options.enabled) {
+      return queryClient.getQueryData<ProjectIcon | null>(options.queryKey) ?? null;
+    }
+    return await queryClient.ensureQueryData(options);
+  }
+
   reconcileServerId(oldServerId: string, newServerId: string): void {
     for (const [key, entry] of this.entries) {
       if (entry.serverId !== oldServerId) continue;
@@ -200,7 +223,7 @@ export class ProjectIconCache {
 export const projectIconCache = new ProjectIconCache(projectIconCacheStorage);
 
 function resolveLookup(
-  target: Pick<ProjectIconTarget, "projectId" | "iconWorkingDir">,
+  target: Pick<ProjectIconPlacement, "projectId" | "iconWorkingDir">,
   supportsCustomIcons: boolean | null,
 ): { kind: "project"; projectId: string } | { kind: "legacy"; cwd: string } | null {
   if (supportsCustomIcons === null) return null;

@@ -68,6 +68,13 @@ agent so a newer notification replaces that agent's older one. The daemon's `dat
 as-is because click routing reads it. The browser fallback has no subtitle or group, so it
 folds the subtitle into the body and maps `id` to the W3C `tag`.
 
+The notification also shows the project icon. On macOS the banner's left icon is always the
+app bundle's: Electron posts through `UNUserNotificationCenter`, where the `icon` option
+becomes an image attachment, shown as a thumbnail on the right of the banner and full width
+when expanded. Electron's `nativeImage` decodes only PNG and JPEG, and project icons are often
+SVG or ICO. The renderer therefore draws the icon into a PNG before it crosses the bridge
+(`packages/app/src/utils/notification-icon.web.ts`).
+
 Electron main shows desktop notifications (`packages/desktop/src/features/notifications.ts`)
 and dismisses every outstanding one when any Paseo window gains focus. Once the user is
 looking at the app the banners are stale, and leaving them in Notification Center means a

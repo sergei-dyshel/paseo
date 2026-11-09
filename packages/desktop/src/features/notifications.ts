@@ -9,6 +9,7 @@ interface NotificationInput {
   body?: unknown;
   groupId?: unknown;
   id?: unknown;
+  icon?: unknown;
   data?: unknown;
 }
 
@@ -53,6 +54,20 @@ function toRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Decode the project icon the renderer sends as a PNG data URL.
+ *
+ * On macOS Electron attaches it to the notification as an image, shown as a thumbnail
+ * beside the text. The icon on the left is always the app's.
+ */
+function toNotificationImage(value: unknown): Electron.NativeImage | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const image = nativeImage.createFromDataURL(value);
+  return image.isEmpty() ? null : image;
 }
 
 function getNotificationIcon(): Electron.NativeImage | null {
@@ -129,7 +144,7 @@ export function registerNotificationHandlers(): void {
     const groupId = toTrimmedString(rawInput?.groupId) ?? undefined;
     const id = toTrimmedString(rawInput?.id) ?? undefined;
     const data = toRecord(rawInput?.data);
-    const icon = getNotificationIcon();
+    const icon = toNotificationImage(rawInput?.icon) ?? getNotificationIcon();
     const settings = await getDesktopSettingsStore().get();
     const notification = new Notification({
       title,

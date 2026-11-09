@@ -1,16 +1,17 @@
 import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { ProjectIcon } from "@getpaseo/protocol/messages";
-import { useHostFeatureAvailabilityMap } from "@/runtime/host-features";
+import { hostSupportsFeature, useHostFeatureAvailabilityMap } from "@/runtime/host-features";
 import { projectIconCache } from "@/projects/icon-cache";
-import type { ProjectIconTarget } from "@/projects/icon-target";
+import type { ProjectIconPlacement, ProjectIconTarget } from "@/projects/icon-target";
 import {
   getHostRuntimeStore,
   isHostRuntimeConnected,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
 } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
 
 /**
  * Daemons without custom-icon support only answer the legacy cwd lookup, which
@@ -33,6 +34,23 @@ function legacyIconQueryKey(serverId: string, cwd: string) {
 export function projectIconDataUri(icon: ProjectIcon | null): string | null {
   if (!icon) return null;
   return `data:${icon.mimeType};base64,${icon.data}`;
+}
+
+/** Load one project's icon as a data URI, as `useProjectIcons` does, outside React. */
+export async function loadProjectIconDataUri(
+  queryClient: QueryClient,
+  placement: ProjectIconPlacement,
+): Promise<string | null> {
+  const serverInfo = useSessionStore.getState().sessions[placement.serverId]?.serverInfo;
+  const runtime = getHostRuntimeStore();
+  const icon = await projectIconCache.load(
+    queryClient,
+    placement,
+    serverInfo ? hostSupportsFeature(serverInfo, "projectCustomIcon") : null,
+    () => runtime.getClient(placement.serverId),
+    isHostRuntimeConnected(runtime.getSnapshot(placement.serverId)),
+  );
+  return projectIconDataUri(icon);
 }
 
 function useStableIconData(data: (string | null)[], signature: string): readonly (string | null)[] {

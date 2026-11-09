@@ -2,7 +2,7 @@ import { useRef, ReactNode, useCallback, useEffect } from "react";
 import { Buffer } from "buffer";
 import { AppState } from "react-native";
 import { observeOpenWorkspaceAgentIds } from "@/stores/workspace-layout-store";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useClientActivity } from "@/hooks/use-client-activity";
 import { useAppVisible } from "@/hooks/use-app-visible";
@@ -34,9 +34,11 @@ import {
   toDaemonServerInfo,
   useSessionStore,
   type SessionState,
+  type WorkspaceDescriptor,
 } from "@/stores/session-store";
 import { sendOsNotification, type OsNotificationPayload } from "@/utils/os-notifications";
 import { buildAgentAttentionNotificationText } from "@/utils/agent-attention-notification-text";
+import { loadProjectIconDataUri } from "@/projects/icons";
 import { resolveAgentLabel } from "@/agent-presentation";
 import { selectWorkspace } from "@/stores/session-store-hooks/selectors";
 import { getIsAppActivelyVisible, getIsAppVisible } from "@/utils/app-visibility";
@@ -133,17 +135,44 @@ interface AgentAttentionEvent {
   notification?: AgentAttentionNotificationPayload;
 }
 
+// the icon decorates the notification, so a host slow to answer must not hold it back
+const NOTIFICATION_ICON_TIMEOUT_MS = 1_000;
+
+async function loadNotificationProjectIcon(
+  queryClient: QueryClient,
+  serverId: string,
+  session: SessionState | undefined,
+  workspace: WorkspaceDescriptor | null,
+): Promise<string | undefined> {
+  const project = workspace ? session?.projects.get(workspace.projectId) : undefined;
+  if (!project) {
+    return undefined;
+  }
+  const icon = loadProjectIconDataUri(queryClient, {
+    serverId,
+    projectId: project.projectId,
+    iconWorkingDir: project.projectRootPath,
+    customIconRevision: project.projectCustomIconRevision,
+    iconRevision: project.projectIconRevision,
+  }).catch(() => null);
+  const timeout = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), NOTIFICATION_ICON_TIMEOUT_MS);
+  });
+  return (await Promise.race([icon, timeout])) ?? undefined;
+}
+
 /**
  * The daemon's notification body previews the agent's last message, which is what
  * mobile push shows. The desktop names where the agent lives and what it wants, from
  * the records the renderer already holds. The daemon's `data` is kept because click
  * routing reads serverId/workspaceId/agentId from it.
  */
-function buildAgentAttentionOsNotification(
+async function buildAgentAttentionOsNotification(
+  queryClient: QueryClient,
   serverId: string,
   session: SessionState | undefined,
   event: AgentAttentionEvent,
-): OsNotificationPayload | null {
+): Promise<OsNotificationPayload | null> {
   const agent = session?.agents.get(event.agentId) ?? session?.agentDetails.get(event.agentId);
   const workspaceId = agent?.workspaceId ?? event.notification?.data.workspaceId;
   if (!workspaceId) {
@@ -162,8 +191,10 @@ function buildAgentAttentionOsNotification(
       event.reason === "permission" ? getLatestPermissionRequest(session, event.agentId) : null,
     backgroundTaskCount: agent?.backgroundTaskCount,
   });
+  const icon = await loadNotificationProjectIcon(queryClient, serverId, session, workspace);
   return {
     ...text,
+    icon,
     data: event.notification?.data ?? {
       serverId,
       workspaceId,
@@ -289,12 +320,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       }
       attentionNotifiedRef.current.set(params.agentId, timestampMs);
 
-      const notification = buildAgentAttentionOsNotification(serverId, session, params);
-      if (notification) {
-        void sendOsNotification(notification);
-      }
+      void buildAgentAttentionOsNotification(queryClient, serverId, session, params).then(
+        (notification) => (notification ? sendOsNotification(notification) : false),
+      );
     },
-    [serverId],
+    [queryClient, serverId],
   );
 
   useEffect(() => {

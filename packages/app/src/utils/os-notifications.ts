@@ -2,6 +2,7 @@ import { Asset } from "expo-asset";
 import { getDesktopHost } from "@/desktop/host";
 import { parseNotificationOpenTarget, WEB_NOTIFICATION_CLICK_EVENT } from "@/notification-open";
 import { isNative } from "@/constants/platform";
+import { rasterizeNotificationIcon } from "@/utils/notification-icon";
 
 export interface OsNotificationPayload {
   title: string;
@@ -12,6 +13,8 @@ export interface OsNotificationPayload {
   groupId?: string;
   /** A new notification with the same id replaces the earlier one. */
   id?: string;
+  /** Image data URI in any format the app renders, SVG included, drawn into a PNG to send. */
+  icon?: string;
   data?: Record<string, unknown>;
 }
 
@@ -142,9 +145,11 @@ export async function sendOsNotification(payload: OsNotificationPayload): Promis
     return false;
   }
 
+  const icon = payload.icon ? await rasterizeNotificationIcon(payload.icon) : null;
+
   const desktopNotificationSender = getDesktopNotificationSender();
   if (desktopNotificationSender) {
-    return await desktopNotificationSender(payload);
+    return await desktopNotificationSender({ ...payload, icon: icon ?? undefined });
   }
 
   const NotificationConstructor = getWebNotificationConstructor();
@@ -158,7 +163,7 @@ export async function sendOsNotification(payload: OsNotificationPayload): Promis
         body,
         tag: payload.id,
         data: payload.data,
-        icon: getWebNotificationIconUrl(),
+        icon: icon ?? getWebNotificationIconUrl(),
       }) as WebNotificationInstance;
       if (hasNotificationClickTarget(payload.data)) {
         attachWebClickHandler(notification, payload.data);

@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
       body?: string;
       groupId?: string;
       id?: string;
+      icon?: string;
       data?: Record<string, unknown>;
     }) => ipcRenderer.invoke("paseo:notification:send", payload),
   },

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createProjectIconTarget } from "./icon-target";
 import { ProjectIconCache, type ProjectIconCacheStorage } from "./icon-cache";
@@ -29,6 +30,17 @@ function clientWith(iconResult: typeof icon | null) {
   return {
     getProjectIcon: async () => ({ requestId: "icon", icon: iconResult }),
   } as unknown as DaemonClient;
+}
+
+function recordingHost(iconResult: typeof icon | null) {
+  const requests: string[] = [];
+  const client = {
+    getProjectIcon: async (projectId: string) => {
+      requests.push(projectId);
+      return { requestId: "icon", icon: iconResult };
+    },
+  } as unknown as DaemonClient;
+  return { client, requests };
 }
 
 describe("ProjectIconCache", () => {
@@ -80,5 +92,54 @@ describe("ProjectIconCache", () => {
       cache.query({ ...target, iconRevision: "revision-b" }, true, () => null, false),
     ).not.toHaveProperty("initialData");
     expect(cache.query(other, true, () => null, false)).toHaveProperty("initialData", null);
+  });
+});
+
+describe("ProjectIconCache.load", () => {
+  it("returns the icon the sidebar's query loaded without asking the host again", async () => {
+    const cache = new ProjectIconCache(new MemoryStorage());
+    const queryClient = new QueryClient();
+    const host = recordingHost(icon);
+    await queryClient.fetchQuery(cache.query(target, true, () => host.client, true));
+
+    expect(await cache.load(queryClient, target, true, () => host.client, true)).toEqual(icon);
+    expect(host.requests).toEqual(["project-a"]);
+  });
+
+  it("returns an icon persisted by an earlier session without asking the host", async () => {
+    const storage = new MemoryStorage();
+    const writer = new ProjectIconCache(storage);
+    writer.setHosts([target.serverId]);
+    await writer.query(target, true, () => clientWith(icon), true).queryFn();
+    await writer.flush();
+    const cache = new ProjectIconCache(storage);
+    cache.setHosts([target.serverId]);
+    await cache.restore();
+    const host = recordingHost(icon);
+
+    expect(await cache.load(new QueryClient(), target, true, () => host.client, true)).toEqual(
+      icon,
+    );
+    expect(host.requests).toEqual([]);
+  });
+
+  it("fetches an icon nothing has loaded and shares it with the sidebar's query", async () => {
+    const cache = new ProjectIconCache(new MemoryStorage());
+    const queryClient = new QueryClient();
+    const host = recordingHost(icon);
+
+    expect(await cache.load(queryClient, target, true, () => host.client, true)).toEqual(icon);
+    const sidebarQuery = cache.query(target, true, () => host.client, true);
+    expect(queryClient.getQueryData(sidebarQuery.queryKey)).toEqual(icon);
+    expect(host.requests).toEqual(["project-a"]);
+  });
+
+  it("only reads the cache while the host is disconnected", async () => {
+    const cache = new ProjectIconCache(new MemoryStorage());
+    const queryClient = new QueryClient();
+    const host = recordingHost(icon);
+
+    expect(await cache.load(queryClient, target, true, () => host.client, false)).toBeNull();
+    expect(host.requests).toEqual([]);
   });
 });
